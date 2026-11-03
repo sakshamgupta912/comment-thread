@@ -36,18 +36,49 @@ import { CommentThread } from '@fluent/comment-thread'
 import type { Comment, CreateCommentInput } from '@fluent/comment-thread'
 
 function Example() {
-  const [comments, setComments] = useState<Comment[]>([])
+  const currentUser = { id: 'you', name: 'You' }
+  const [comments, setComments] = useState<Comment[]>([
+    {
+      id: 'thread-1',
+      parentId: null,
+      author: { id: 'alex', name: 'Alex Morgan' },
+      text: 'Can we confirm the updated delivery timeline?',
+      createdAt: '2026-02-20T09:00:00.000Z',
+    },
+    {
+      id: 'reply-1',
+      parentId: 'thread-1',
+      author: { id: 'jordan', name: 'Jordan Lee' },
+      text: 'The revised schedule is ready for review.',
+      createdAt: '2026-02-20T09:15:00.000Z',
+    },
+    {
+      id: 'thread-2',
+      parentId: null,
+      author: { id: 'taylor', name: 'Taylor Reed' },
+      text: 'I added the notes from our last meeting.',
+      createdAt: '2026-02-20T10:00:00.000Z',
+    },
+  ])
 
   async function onCreate(input: CreateCommentInput) {
-    const savedComment = await api.createComment(input)
-    setComments((current) => [...current, savedComment])
+    setComments((current) => [
+      ...current,
+      {
+        id: `comment-${current.length + 1}`,
+        parentId: input.parentId,
+        author: currentUser,
+        text: input.text,
+        createdAt: new Date().toISOString(),
+      },
+    ])
   }
 
   return (
     <FluentProvider theme={webLightTheme}>
       <CommentThread
         comments={comments}
-        currentUser={{ id: 'user-id', name: 'Current user' }}
+        currentUser={currentUser}
         onCreate={onCreate}
       />
     </FluentProvider>
@@ -56,6 +87,8 @@ function Example() {
 ```
 
 `onCreate` is the only required callback. It receives `{ text, parentId }` for both new comments (`parentId: null`) and replies. Resolve the promise after the consumer accepts the comment and updates the `comments` prop. The component clears the submitted draft on success and keeps it visible with an error on rejection. The consumer owns authentication, authorization, API calls, and persistence.
+
+The example starts with two conversations and a reply, then appends new comments to in-memory React state. Replace that state update with your API call and persisted comment in an application.
 
 The component is controlled-only in v1; it does not keep a second, uncontrolled comment list. For server-confirmed updates, resolve `onCreate` after the saved comment is reflected in `comments`. For optimistic updates, update `comments` before resolving and roll back/reject on failure; the composer draft remains until the promise resolves. If a selected reply target is removed while its thread remains, the draft is preserved and the next submission targets that thread's root comment.
 
