@@ -4,7 +4,7 @@ Checklist for turning the Fluent UI comment-feed prototype into an npm package.
 
 **Audit status (2026-11-03): not ready to publish.** The standalone package has an MIT license, but registry access, pagination issues, compatibility, accessibility, and CI checks remain open.
 
-Verified after the repository split: a clean demo install and build, lint, 8 unit tests, 17 Chromium browser tests, a 15-file package, and packed and local-Git ESM consumers installed through the internal registry and rendered on the server. The packed consumer also rendered and posted a comment in Chromium. An earlier publish dry run warned that registry login is required. Partial items remain unchecked.
+Verified after the repository split: a clean demo install and build, lint, 8 unit tests, 17 Chromium browser tests, a 15-file package, and packed, local-Git, and GitHub ESM consumers installed through the internal registry and rendered on the server. The packed consumer also rendered and posted a comment in Chromium. An earlier publish dry run warned that registry login is required. Partial items remain unchecked.
 
 ## Goal and scope
 
@@ -95,7 +95,7 @@ Done when: a consumer can npm i the package, pass props and callbacks, and use i
 - [ ] npx publint clean
 - [ ] npx @arethetypeswrong/cli --pack . clean (types resolve for every shipped module format)
 - [x] Package smoke test using the packed .tgz (not npm link) in a clean consumer app, ideally Vite and Next.js — verified with Vite/Chromium and server rendering; Next.js remains a separate open item.
-- [x] Install from a local Git URL using the internal registry — `prepare` built the package and the installed ESM rendered on the server; installation from an actual GitHub repository is not yet verified.
+- [x] Install from a local Git URL and GitHub using the internal registry — `prepare` built the package and the installed ESM rendered on the server in both cases.
 - [x] Smoke-test every shipped module format, including CJS if provided — ESM is the only shipped format.
 - [ ] Smoke-test the packed package in a Next.js App Router app
 - [ ] CI matrix covers each supported React version
