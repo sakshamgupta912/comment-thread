@@ -1,11 +1,17 @@
 'use client'
 
-import { forwardRef, useMemo, useRef, useState } from 'react'
+import { forwardRef, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import {
   Avatar,
   Button,
   Card,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
   makeStyles,
   MessageBar,
   MessageBarBody,
@@ -13,6 +19,7 @@ import {
   Spinner,
   Text,
   tokens,
+  useRestoreFocusTarget,
 } from '@fluentui/react-components'
 import { CommentComposer } from './CommentComposer.js'
 import { parseMentions } from './mentions.js'
@@ -28,9 +35,19 @@ const defaultLabels: CommentThreadLabels = {
   replyingTo: 'Replying to',
   cancelReply: 'Cancel reply',
   reply: 'Reply',
+  delete: 'Delete',
+  deleting: 'Deleting...',
+  cancelDelete: 'Cancel',
+  deleteTitle: 'Delete comment?',
+  deleteConfirmation: (comment, replyCount) =>
+    replyCount > 0
+      ? `Delete the comment by ${comment.author.name} and its ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}? This cannot be undone.`
+      : `Delete the comment by ${comment.author.name}? This cannot be undone.`,
+  deleteFailed: 'Could not delete the comment. Please try again.',
   sendReply: 'Send reply',
   post: 'Post',
   posting: 'Posting...',
+  postFailed: 'Could not post your comment. Please try again.',
   viewReplies: (count) => `View ${count} ${count === 1 ? 'reply' : 'replies'}`,
   hideReplies: 'Hide',
   loadMore: 'Show more',
@@ -39,10 +56,16 @@ const defaultLabels: CommentThreadLabels = {
   loading: 'Loading...',
   noMentions: 'No people found.',
   mentionSearchFailed: 'Could not load people. Try again.',
+  mentionList: 'Mention a person',
+  invalidComments: (reason) => reason || 'The comment data is invalid.',
   commentsCount: (count) => `${count} comment ${count === 1 ? 'post' : 'posts'}`,
 }
 
 const avatarSize = 32
+// Relative times must not differ between the server and the first hydration render.
+const subscribeToHydration = () => () => {}
+const clientSnapshot = () => true
+const serverSnapshot = () => false
 
 const useStyles = makeStyles({
   root: {
@@ -103,12 +126,25 @@ const useStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
+  commentHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: tokens.spacingHorizontalS,
+  },
   authorRow: {
     display: 'flex',
+    flex: 1,
+    minWidth: 0,
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: tokens.spacingHorizontalXS,
     minHeight: `${avatarSize}px`,
+  },
+  deleteAction: {
+    flexShrink: 0,
+    width: `${avatarSize}px`,
+    height: `${avatarSize}px`,
+    color: tokens.colorNeutralForeground3,
   },
   author: {
     minWidth: 0,
@@ -154,8 +190,8 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
-    marginTop: tokens.spacingVerticalL,
-    paddingTop: tokens.spacingVerticalM,
+    marginTop: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalS,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   replyReference: {
@@ -255,23 +291,40 @@ function formatRelativeTime(date: Date): string {
 
 function CommentText({ text }: { text: string }) {
   const styles = useStyles()
-  return parseMentions(text).map((part, index) => part.contactId === undefined ? (
-    part.text
-  ) : (
-    <span className={styles.mention} key={`${part.contactId}-${index}`}>
-      <Avatar
-        size={20}
-        name={part.text}
-      />
-      <span className={styles.mentionText}>{part.text}</span>
-    </span>
-  ))
+  return parseMentions(text).map((part, index) =>
+    part.contactId === undefined ? (
+      part.text
+    ) : (
+      <span className={styles.mention} key={`${part.contactId}-${index}`}>
+        <Avatar size={20} name={part.text} />
+        <span className={styles.mentionText}>{part.text}</span>
+      </span>
+    ),
+  )
 }
 
 function ReplyIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path d="m8 4-5 5 5 5M3 9h8a5 5 0 0 1 5 5v2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="m8 4-5 5 5 5M3 9h8a5 5 0 0 1 5 5v2"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function DeleteIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12M8 8v6m4-6v6"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
@@ -279,208 +332,380 @@ function ReplyIcon() {
 function ChevronIcon({ up = false }: { up?: boolean }) {
   return (
     <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path d={up ? 'm6 12 4-4 4 4' : 'm6 8 4 4 4-4'} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d={up ? 'm6 12 4-4 4 4' : 'm6 8 4 4 4-4'}
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
 
-export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(
-  function CommentThread(
-    {
-      comments,
-      currentUser,
-      onCreate,
-      contactSearch,
-      loading = false,
-      error = null,
-      readOnly = false,
-      maxDepth = 3,
-      pagination = true,
-      pageSize = 2,
-      formatDate = formatRelativeTime,
-      labels: labelOverrides,
-      className,
-      ...rootProps
-    },
-    ref,
-  ) {
-    const styles = useStyles()
-    const itemsPerPage = Number.isFinite(pageSize) ? Math.max(1, Math.floor(pageSize)) : 2
-    const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-    const [visibleCount, setVisibleCount] = useState<number | 'all'>(itemsPerPage)
-    const [drafts, setDrafts] = useState<Record<string, string>>({})
-    const [replyTargetId, setReplyTargetId] = useState<string | null>(null)
-    const [submitting, setSubmitting] = useState<Record<string, boolean>>({})
-    const [submitErrors, setSubmitErrors] = useState<Record<string, string>>({})
-    const pending = useRef(new Set<string>())
-    const labels = { ...defaultLabels, ...labelOverrides }
-    const depthLimit = Number.isFinite(maxDepth) ? Math.max(0, Math.floor(maxDepth)) : 3
-    const indexResult = useMemo(() => {
-      try {
-        return { index: createCommentIndex(comments), error: null }
-      } catch (cause) {
-        return {
-          index: null,
-          error: cause instanceof Error ? cause.message : 'The comment data is invalid.',
-        }
+export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(function CommentThread(
+  {
+    comments,
+    currentUser,
+    onCreate,
+    onDelete,
+    canDelete = (comment, user) => comment.author.id === user.id,
+    contactSearch,
+    loading = false,
+    error = null,
+    readOnly = false,
+    maxDepth = 3,
+    pagination = true,
+    pageSize = 2,
+    formatDate,
+    labels: labelOverrides,
+    className,
+    ...rootProps
+  },
+  ref,
+) {
+  const styles = useStyles()
+  const restoreFocusTarget = useRestoreFocusTarget()
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientSnapshot, serverSnapshot)
+  const instanceId = useId()
+  const itemsPerPage = Number.isFinite(pageSize) ? Math.max(1, Math.floor(pageSize)) : 2
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const [page, setPage] = useState({
+    mode: pagination,
+    size: itemsPerPage,
+    count: itemsPerPage as number | 'all',
+  })
+  let visibleCount = page.count
+  if (page.mode !== pagination || page.size !== itemsPerPage) {
+    visibleCount = itemsPerPage
+    setPage({ mode: pagination, size: itemsPerPage, count: itemsPerPage })
+  }
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [replyTargetId, setReplyTargetId] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState<Record<string, boolean>>({})
+  const [submitErrors, setSubmitErrors] = useState<Record<string, string>>({})
+  const pending = useRef(new Set<string>())
+  const [deleteDialogMounted, setDeleteDialogMounted] = useState(false)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const deletePending = useRef(false)
+  const deleteTrigger = useRef<HTMLButtonElement | null>(null)
+  const deleteSurface = useRef<HTMLDivElement>(null)
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const labels = { ...defaultLabels, ...labelOverrides }
+  const depthLimit = Number.isFinite(maxDepth) ? Math.max(0, Math.floor(maxDepth)) : 3
+  const indexResult = useMemo(() => {
+    try {
+      return { index: createCommentIndex(comments), error: null }
+    } catch (cause) {
+      return {
+        index: null,
+        error: cause instanceof Error ? cause.message : '',
       }
-    }, [comments])
-    const index = indexResult.index
-    const roots = index?.roots ?? []
-    const visibleRoots = !pagination || visibleCount === 'all'
+    }
+  }, [comments])
+  const index = indexResult.index
+  const roots = index?.roots ?? []
+  const visibleRoots =
+    !pagination || visibleCount === 'all'
       ? roots
       : roots.slice(0, Math.max(visibleCount, itemsPerPage))
-    const globalError = indexResult.error ?? error
+  const globalError = index === null ? labels.invalidComments(indexResult.error ?? '') : error
+  const deleteTarget = deleteTargetId === null ? undefined : index?.byId.get(deleteTargetId)
+  const deleteAllowed = Boolean(
+    onDelete &&
+    deleteTarget &&
+    !readOnly &&
+    !loading &&
+    !globalError &&
+    canDelete(deleteTarget, currentUser),
+  )
 
-    function descendants(id: string): number {
-      return (index?.childrenByParent.get(id) ?? []).reduce(
-        (total, child) => total + 1 + descendants(child.id),
-        0,
-      )
-    }
+  function descendants(id: string): number {
+    return (index?.childrenByParent.get(id) ?? []).reduce(
+      (total, child) => total + 1 + descendants(child.id),
+      0,
+    )
+  }
 
-    function submit(draftId: string, parentId: string | null) {
-      const text = drafts[draftId] ?? ''
-      if (!text.trim() || readOnly || loading || globalError || pending.current.has(draftId)) return
+  function submit(draftId: string, parentId: string | null, editorId: string) {
+    const text = drafts[draftId] ?? ''
+    if (
+      !text.trim() ||
+      readOnly ||
+      loading ||
+      globalError ||
+      deletePending.current ||
+      pending.current.has(draftId)
+    )
+      return
 
-      pending.current.add(draftId)
-      setSubmitting((previous) => ({ ...previous, [draftId]: true }))
-      setSubmitErrors((previous) => ({ ...previous, [draftId]: '' }))
+    pending.current.add(draftId)
+    const focusedElement = document.activeElement
+    setSubmitting((previous) => ({ ...previous, [draftId]: true }))
+    setSubmitErrors((previous) => ({ ...previous, [draftId]: '' }))
 
-      void Promise.resolve()
-        .then(() => onCreate({ text: text.trim(), parentId }))
-        .then(() => {
-          setDrafts((previous) => ({ ...previous, [draftId]: '' }))
-          setReplyTargetId(null)
+    void Promise.resolve()
+      .then(() => onCreate({ text: text.trim(), parentId }))
+      .then(() => {
+        setDrafts((previous) => ({ ...previous, [draftId]: '' }))
+        setReplyTargetId(null)
+        window.requestAnimationFrame(() => {
+          if (
+            document.activeElement === focusedElement ||
+            document.activeElement === document.body
+          ) {
+            document.getElementById(editorId)?.focus()
+          }
         })
-        .catch((cause: unknown) => {
-          setSubmitErrors((previous) => ({
-            ...previous,
-            [draftId]: cause instanceof Error ? cause.message : 'Could not post your comment. Please try again.',
-          }))
-        })
-        .finally(() => {
-          pending.current.delete(draftId)
-          setSubmitting((previous) => ({ ...previous, [draftId]: false }))
-        })
-    }
+      })
+      .catch((cause: unknown) => {
+        setSubmitErrors((previous) => ({
+          ...previous,
+          [draftId]: cause instanceof Error && cause.message ? cause.message : labels.postFailed,
+        }))
+      })
+      .finally(() => {
+        pending.current.delete(draftId)
+        setSubmitting((previous) => ({ ...previous, [draftId]: false }))
+      })
+  }
 
-    function updateDraft(id: string, value: string) {
-      setDrafts((previous) => ({ ...previous, [id]: value }))
-      if (submitErrors[id]) setSubmitErrors((previous) => ({ ...previous, [id]: '' }))
-    }
+  function updateDraft(id: string, value: string) {
+    setDrafts((previous) => ({ ...previous, [id]: value }))
+    if (submitErrors[id]) setSubmitErrors((previous) => ({ ...previous, [id]: '' }))
+  }
 
-    function renderComment(comment: Comment): ReactNode {
-      const depth = index!.depthById.get(comment.id)!
-      const children = index!.childrenByParent.get(comment.id) ?? []
-      const name = comment.author.name
-      return (
-        <div
-          key={comment.id}
-          className={styles.avatarRow}
-        >
-          <Avatar
-            size={avatarSize}
-            name={name}
-            image={comment.author.avatarUrl ? { src: comment.author.avatarUrl } : undefined}
-          />
-          <div className={styles.content}>
+  function closeDeleteDialog() {
+    const activeElement = document.activeElement
+    if (activeElement instanceof HTMLElement && deleteSurface.current?.contains(activeElement)) {
+      activeElement.blur()
+    }
+    setDeleteTargetId(null)
+    setDeleteError(null)
+  }
+
+  function restoreDeleteFocus() {
+    const trigger = deleteTrigger.current
+    const target =
+      trigger?.isConnected && !trigger.disabled
+        ? trigger
+        : (document.getElementById(`${instanceId}-main`) ?? titleRef.current)
+    target?.focus()
+  }
+
+  async function confirmDelete() {
+    if (
+      !deleteAllowed ||
+      !onDelete ||
+      !deleteTarget ||
+      deletePending.current ||
+      pending.current.size > 0
+    )
+      return
+    deletePending.current = true
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await onDelete(deleteTarget)
+      closeDeleteDialog()
+    } catch (cause: unknown) {
+      setDeleteError(cause instanceof Error && cause.message ? cause.message : labels.deleteFailed)
+    } finally {
+      deletePending.current = false
+      setDeleting(false)
+    }
+  }
+
+  function renderComment(comment: Comment): ReactNode {
+    const depth = index!.depthById.get(comment.id)!
+    const children = index!.childrenByParent.get(comment.id) ?? []
+    const name = comment.author.name
+    return (
+      <div key={comment.id} className={styles.avatarRow}>
+        <Avatar
+          size={avatarSize}
+          name={name}
+          image={comment.author.avatarUrl ? { src: comment.author.avatarUrl } : undefined}
+        />
+        <div className={styles.content}>
+          <div className={styles.commentHeader}>
             <div className={styles.authorRow}>
-              <Text className={styles.author} weight="semibold">{name}</Text>
+              <Text className={styles.author} weight="semibold">
+                {name}
+              </Text>
               <time
                 className={styles.timestamp}
                 dateTime={comment.createdAt}
                 title={new Date(comment.createdAt).toISOString()}
               >
-                {formatDate(new Date(comment.createdAt))}
+                {formatDate
+                  ? formatDate(new Date(comment.createdAt))
+                  : hydrated
+                    ? formatRelativeTime(new Date(comment.createdAt))
+                    : new Date(comment.createdAt).toISOString()}
               </time>
             </div>
-            <div className={styles.body}>
-              <CommentText text={comment.text} />
-            </div>
-            <div className={styles.actions}>
-              {!readOnly && depth < depthLimit && (
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<ReplyIcon />}
-                  onClick={() => {
-                    setReplyTargetId(comment.id)
-                    const rootId = index!.rootIdById.get(comment.id)
-                    if (rootId) setExpanded((previous) => new Set(previous).add(rootId))
-                  }}
-                >
-                  {labels.reply}
-                </Button>
-              )}
-              {depth === 0 && descendants(comment.id) > 0 && (
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  aria-expanded={expanded.has(comment.id)}
-                  aria-controls={`comment-replies-${comment.id}`}
-                  onClick={() => setExpanded((previous) => {
+            {onDelete && !readOnly && canDelete(comment, currentUser) && (
+              <Button
+                {...restoreFocusTarget}
+                appearance="subtle"
+                size="small"
+                className={styles.deleteAction}
+                icon={<DeleteIcon />}
+                aria-label={labels.delete}
+                title={labels.delete}
+                disabled={deleting || Object.values(submitting).some(Boolean)}
+                onClick={(event) => {
+                  deleteTrigger.current = event.currentTarget
+                  event.currentTarget.focus()
+                  setDeleteDialogMounted(true)
+                  setDeleteError(null)
+                  setDeleteTargetId(comment.id)
+                }}
+              />
+            )}
+          </div>
+          <div className={styles.body}>
+            <CommentText text={comment.text} />
+          </div>
+          <div className={styles.actions}>
+            {!readOnly && depth < depthLimit && (
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<ReplyIcon />}
+                disabled={deleting}
+                onClick={() => {
+                  setReplyTargetId(comment.id)
+                  const rootId = index!.rootIdById.get(comment.id)
+                  if (rootId) setExpanded((previous) => new Set(previous).add(rootId))
+                }}
+              >
+                {labels.reply}
+              </Button>
+            )}
+            {depth === 0 && descendants(comment.id) > 0 && (
+              <Button
+                appearance="subtle"
+                size="small"
+                aria-expanded={expanded.has(comment.id)}
+                aria-controls={`${instanceId}-replies-${encodeURIComponent(comment.id)}`}
+                onClick={() =>
+                  setExpanded((previous) => {
                     const next = new Set(previous)
                     if (next.has(comment.id)) next.delete(comment.id)
                     else next.add(comment.id)
                     return next
-                  })}
-                >
-                  {expanded.has(comment.id) ? labels.hideReplies : labels.viewReplies(descendants(comment.id))}
-                </Button>
-              )}
-            </div>
-            {children.length > 0 && (
-              <div
-                className={styles.replies}
-                id={depth === 0 ? `comment-replies-${comment.id}` : undefined}
-                hidden={depth === 0 && !expanded.has(comment.id)}
+                  })
+                }
               >
-                {children.map(renderComment)}
-              </div>
+                {expanded.has(comment.id)
+                  ? labels.hideReplies
+                  : labels.viewReplies(descendants(comment.id))}
+              </Button>
             )}
           </div>
-        </div>
-      )
-    }
-
-    return (
-      <div
-        {...rootProps}
-        ref={ref}
-        className={[styles.root, className].filter(Boolean).join(' ')}
-      >
-        <Card appearance="outline" className={styles.feed}>
-          <header className={styles.header}>
-            <h2 className={styles.title}>{labels.title}</h2>
-            <Text className={styles.muted} aria-live="polite">
-              {labels.commentsCount(comments.length)}
-            </Text>
-          </header>
-
-          {globalError && (
-            <MessageBar intent="error" role="alert" className={styles.error}>
-              <MessageBarBody>{globalError}</MessageBarBody>
-            </MessageBar>
-          )}
-
-          {loading && (
-            <div role="status" className={styles.empty}>
-              <Spinner label={labels.loading} />
+          {children.length > 0 && (
+            <div
+              className={styles.replies}
+              id={
+                depth === 0 ? `${instanceId}-replies-${encodeURIComponent(comment.id)}` : undefined
+              }
+              hidden={depth === 0 && !expanded.has(comment.id)}
+            >
+              {children.map(renderComment)}
             </div>
           )}
+        </div>
+      </div>
+    )
+  }
 
-          {!loading && !globalError && comments.length === 0 && (
-            <Text className={mergeClasses(styles.empty, styles.muted)}>{labels.empty}</Text>
-          )}
+  return (
+    <div {...rootProps} ref={ref} className={[styles.root, className].filter(Boolean).join(' ')}>
+      {onDelete && deleteDialogMounted && (
+        <Dialog
+          open={deleteAllowed}
+          surfaceMotion={{
+            onMotionFinish: (_, { direction }) => {
+              if (direction === 'exit') restoreDeleteFocus()
+            },
+          }}
+          onOpenChange={(_, data) => {
+            if (!data.open && !deletePending.current) {
+              closeDeleteDialog()
+            }
+          }}
+        >
+          <DialogSurface ref={deleteSurface} aria-busy={deleting}>
+            <DialogBody>
+              <DialogTitle>{labels.deleteTitle}</DialogTitle>
+              <DialogContent>
+                {deleteTarget &&
+                  labels.deleteConfirmation(deleteTarget, descendants(deleteTarget.id))}
+                {deleteError && (
+                  <MessageBar intent="error" role="alert">
+                    <MessageBarBody>{deleteError}</MessageBarBody>
+                  </MessageBar>
+                )}
+              </DialogContent>
+              <DialogActions>
+                <Button disabled={deleting} onClick={closeDeleteDialog}>
+                  {labels.cancelDelete}
+                </Button>
+                <Button
+                  appearance="primary"
+                  icon={<DeleteIcon />}
+                  disabled={deleting}
+                  onClick={() => {
+                    void confirmDelete()
+                  }}
+                >
+                  {deleting ? labels.deleting : labels.delete}
+                </Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
+      )}
+      <Card appearance="outline" className={styles.feed}>
+        <header className={styles.header}>
+          <h2 ref={titleRef} tabIndex={-1} className={styles.title}>
+            {labels.title}
+          </h2>
+          <Text className={styles.muted} aria-live="polite">
+            {labels.commentsCount(comments.length)}
+          </Text>
+        </header>
 
-          {!loading && !globalError && visibleRoots.map((root) => {
+        {globalError && (
+          <MessageBar intent="error" role="alert" className={styles.error}>
+            <MessageBarBody>{globalError}</MessageBarBody>
+          </MessageBar>
+        )}
+
+        {loading && (
+          <div role="status" className={styles.empty}>
+            <Spinner label={labels.loading} />
+          </div>
+        )}
+
+        {!loading && !globalError && comments.length === 0 && (
+          <Text className={mergeClasses(styles.empty, styles.muted)}>{labels.empty}</Text>
+        )}
+
+        {!loading &&
+          !globalError &&
+          visibleRoots.map((root) => {
             const rootId = root.id
-            const target = replyTargetId && index!.rootIdById.get(replyTargetId) === rootId
-              ? index!.byId.get(replyTargetId) ?? root
-              : root
+            const target =
+              replyTargetId && index!.rootIdById.get(replyTargetId) === rootId
+                ? (index!.byId.get(replyTargetId) ?? root)
+                : root
             const isReplying = replyTargetId === target.id
-            const draftId = root.id
+            const draftId = `thread:${root.id}`
+            const editorId = `${instanceId}-editor-${encodeURIComponent(rootId)}`
             const draft = drafts[draftId] ?? ''
             const isSubmitting = Boolean(submitting[draftId])
 
@@ -505,7 +730,9 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(
                             <ReplyIcon />
                             <div className={styles.replyReferenceText}>
                               <Text weight="semibold">{target.author.name}</Text>
-                              <Text className={styles.replyReferenceLabel}>{labels.replyingTo}</Text>
+                              <Text className={styles.replyReferenceLabel}>
+                                {labels.replyingTo}
+                              </Text>
                             </div>
                             <Button
                               appearance="transparent"
@@ -514,7 +741,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(
                               onClick={() => {
                                 setReplyTargetId(null)
                                 window.requestAnimationFrame(() => {
-                                  document.getElementById(`comment-editor-${rootId}`)?.focus()
+                                  document.getElementById(editorId)?.focus()
                                 })
                               }}
                             >
@@ -523,16 +750,18 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(
                           </div>
                         )}
                         <CommentComposer
-                          id={`comment-editor-${rootId}`}
+                          id={editorId}
                           value={draft}
                           onChange={(value) => updateDraft(draftId, value)}
-                          onSubmit={() => submit(draftId, target.id)}
-                          placeholder={isReplying ? labels.replyTo(target.author.name) : labels.addReply}
+                          onSubmit={() => submit(draftId, target.id, editorId)}
+                          placeholder={
+                            isReplying ? labels.replyTo(target.author.name) : labels.addReply
+                          }
                           labels={labels}
                           contactSearch={contactSearch}
-                          disabled={loading || isSubmitting || Boolean(globalError)}
+                          disabled={loading || isSubmitting || deleting || Boolean(globalError)}
                           sendButton
-                          autoFocus={isReplying}
+                          focusOnReply={isReplying}
                         />
                       </div>
                     </div>
@@ -547,9 +776,10 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(
             )
           })}
 
-          {!loading && !globalError && (
-            <>
-              {pagination && (visibleRoots.length < roots.length || visibleRoots.length > itemsPerPage) && (
+        {!loading && !globalError && (
+          <>
+            {pagination &&
+              (visibleRoots.length < roots.length || visibleRoots.length > itemsPerPage) && (
                 <div className={styles.pagination}>
                   {visibleRoots.length < roots.length && (
                     <Button
@@ -558,9 +788,15 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(
                       className={styles.paginationAction}
                       icon={<ChevronIcon />}
                       iconPosition="after"
-                      onClick={() => setVisibleCount((count) =>
-                        pagination === 'show-all' || count === 'all' ? 'all' : count + itemsPerPage,
-                      )}
+                      onClick={() =>
+                        setPage((current) => ({
+                          ...current,
+                          count:
+                            pagination === 'show-all' || current.count === 'all'
+                              ? 'all'
+                              : current.count + itemsPerPage,
+                        }))
+                      }
                     >
                       {pagination === 'show-all' ? labels.showAll : labels.loadMore}
                     </Button>
@@ -572,51 +808,61 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(
                       className={styles.paginationAction}
                       icon={<ChevronIcon up />}
                       iconPosition="after"
-                      onClick={() => setVisibleCount(itemsPerPage)}
+                      onClick={() =>
+                        setPage({ mode: pagination, size: itemsPerPage, count: itemsPerPage })
+                      }
                     >
                       {labels.showLess}
                     </Button>
                   )}
                 </div>
               )}
-              {!readOnly && (
-                <footer className={styles.mainFooter}>
-                  <div className={styles.avatarRow}>
-                    <Avatar
-                      size={avatarSize}
-                      name={currentUser.name}
-                      image={currentUser.avatarUrl ? { src: currentUser.avatarUrl } : undefined}
-                    />
-                    <CommentComposer
-                      value={drafts.main ?? ''}
-                      onChange={(value) => updateDraft('main', value)}
-                      onSubmit={() => submit('main', null)}
-                      placeholder={labels.newConversation}
-                      labels={labels}
-                      contactSearch={contactSearch}
-                      disabled={loading || Boolean(submitting.main) || Boolean(globalError)}
-                    />
-                  </div>
-                  {submitErrors.main && (
-                    <MessageBar intent="error" role="alert">
-                      <MessageBarBody>{submitErrors.main}</MessageBarBody>
-                    </MessageBar>
-                  )}
-                  <div className={styles.postRow}>
-                    <Button
-                      appearance="primary"
-                      disabled={!drafts.main?.trim() || Boolean(submitting.main) || loading || Boolean(globalError)}
-                      onClick={() => submit('main', null)}
-                    >
-                      {submitting.main ? labels.posting : labels.post}
-                    </Button>
-                  </div>
-                </footer>
-              )}
-            </>
-          )}
-        </Card>
-      </div>
-    )
-  },
-)
+            {!readOnly && (
+              <footer className={styles.mainFooter}>
+                <div className={styles.avatarRow}>
+                  <Avatar
+                    size={avatarSize}
+                    name={currentUser.name}
+                    image={currentUser.avatarUrl ? { src: currentUser.avatarUrl } : undefined}
+                  />
+                  <CommentComposer
+                    id={`${instanceId}-main`}
+                    value={drafts.main ?? ''}
+                    onChange={(value) => updateDraft('main', value)}
+                    onSubmit={() => submit('main', null, `${instanceId}-main`)}
+                    placeholder={labels.newConversation}
+                    labels={labels}
+                    contactSearch={contactSearch}
+                    disabled={
+                      loading || Boolean(submitting.main) || deleting || Boolean(globalError)
+                    }
+                  />
+                </div>
+                {submitErrors.main && (
+                  <MessageBar intent="error" role="alert">
+                    <MessageBarBody>{submitErrors.main}</MessageBarBody>
+                  </MessageBar>
+                )}
+                <div className={styles.postRow}>
+                  <Button
+                    appearance="primary"
+                    disabled={
+                      !drafts.main?.trim() ||
+                      Boolean(submitting.main) ||
+                      deleting ||
+                      loading ||
+                      Boolean(globalError)
+                    }
+                    onClick={() => submit('main', null, `${instanceId}-main`)}
+                  >
+                    {submitting.main ? labels.posting : labels.post}
+                  </Button>
+                </div>
+              </footer>
+            )}
+          </>
+        )}
+      </Card>
+    </div>
+  )
+})

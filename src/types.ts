@@ -11,6 +11,7 @@ export interface Comment {
   parentId: string | null
   author: CommentAuthor
   text: string
+  /** ISO 8601 date-time with seconds and an explicit Z or numeric offset. */
   createdAt: string
 }
 
@@ -30,9 +31,16 @@ export interface CommentThreadLabels {
   replyingTo: string
   cancelReply: string
   reply: string
+  delete: string
+  deleting: string
+  cancelDelete: string
+  deleteTitle: string
+  deleteConfirmation: (comment: Comment, replyCount: number) => string
+  deleteFailed: string
   sendReply: string
   post: string
   posting: string
+  postFailed: string
   viewReplies: (count: number) => string
   hideReplies: string
   loadMore: string
@@ -41,6 +49,8 @@ export interface CommentThreadLabels {
   loading: string
   noMentions: string
   mentionSearchFailed: string
+  mentionList: string
+  invalidComments: (reason: string) => string
   commentsCount: (count: number) => string
 }
 
@@ -48,6 +58,10 @@ export interface CommentThreadProps extends Omit<HTMLAttributes<HTMLDivElement>,
   comments: Comment[]
   currentUser: CommentAuthor
   onCreate: (input: CreateCommentInput) => Promise<void>
+  /** Delete the comment and its descendants, then update comments before resolving. */
+  onDelete?: (comment: Comment) => Promise<void>
+  /** Controls action visibility, not server authorization. Defaults to author-only. */
+  canDelete?: (comment: Comment, currentUser: CommentAuthor) => boolean
   /** Receives an empty query when the user types @ without a search term. */
   contactSearch?: (query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>
   loading?: boolean

@@ -9,8 +9,9 @@ const mentionPattern = /@\[((?:\\.|[^\]\\])+)\]\(([^)\s]+)\)/g
 
 export function serializeMention(suggestion: MentionSuggestion): string {
   const name = suggestion.name.replaceAll('\\', '\\\\').replaceAll(']', '\\]')
-  const encodedId = encodeURIComponent(suggestion.id).replace(/[!'()*]/g, (character) =>
-    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  const encodedId = encodeURIComponent(suggestion.id).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
   )
   return `@[${name}](${encodedId})`
 }

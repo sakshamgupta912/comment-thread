@@ -22,6 +22,7 @@ const useStyles = makeStyles({
     },
   },
   editor: {
+    boxSizing: 'border-box',
     flex: 1,
     minWidth: 0,
     minHeight: '36px',
@@ -106,7 +107,7 @@ interface CommentComposerProps {
   contactSearch?: (query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>
   disabled?: boolean
   sendButton?: boolean
-  autoFocus?: boolean
+  focusOnReply?: boolean
 }
 
 function readEditor(element: Node): string {
@@ -136,7 +137,7 @@ export function CommentComposer({
   contactSearch,
   disabled = false,
   sendButton = false,
-  autoFocus = false,
+  focusOnReply = false,
 }: CommentComposerProps) {
   const styles = useStyles()
   const editor = useRef<HTMLDivElement>(null)
@@ -151,8 +152,8 @@ export function CommentComposer({
     failed: boolean
   }>({ query: null, suggestions: [], loading: false, failed: false })
   const query = getMentionQuery(value)
-  const showSuggestions = focused && query !== null &&
-    query !== dismissedQuery && contactSearch !== undefined
+  const showSuggestions =
+    focused && query !== null && query !== dismissedQuery && contactSearch !== undefined
   const hasCurrentSearch = query !== null && searchResult.query === query
   const suggestions = hasCurrentSearch ? searchResult.suggestions : []
   const searching = showSuggestions && (!hasCurrentSearch || searchResult.loading)
@@ -191,8 +192,8 @@ export function CommentComposer({
   }, [contactSearch, query, showSuggestions])
 
   useEffect(() => {
-    if (autoFocus) editor.current?.focus()
-  }, [autoFocus])
+    if (focusOnReply) editor.current?.focus()
+  }, [focusOnReply])
 
   useEffect(() => {
     const element = editor.current
@@ -222,26 +223,33 @@ export function CommentComposer({
   function chooseSuggestion(index: number) {
     const suggestion = suggestions[index]
     if (!suggestion || query === null) return
-    onChange(value.replace(/(?:^|\s)@[\w]*$/, (match) => {
-      const prefix = match.startsWith('@') ? '' : match.slice(0, match.lastIndexOf('@'))
-      return `${prefix}${serializeMention(suggestion)} `
-    }))
+    onChange(
+      value.replace(/(?:^|\s)@[\w]*$/, (match) => {
+        const prefix = match.startsWith('@') ? '' : match.slice(0, match.lastIndexOf('@'))
+        return `${prefix}${serializeMention(suggestion)} `
+      }),
+    )
     setSelected(0)
     setDismissedQuery(null)
     editor.current?.focus()
   }
 
-  const listOpen = showSuggestions && (
-    searching ||
-    searchFailed ||
-    suggestions.length > 0 ||
-    (hasCurrentSearch && !searchResult.loading)
-  )
+  const listOpen =
+    showSuggestions &&
+    (searching ||
+      searchFailed ||
+      suggestions.length > 0 ||
+      (hasCurrentSearch && !searchResult.loading))
 
   return (
     <div className={styles.composer}>
       {listOpen && (
-        <div id={listId} role="listbox" aria-label="Mention a person" className={styles.suggestionList}>
+        <div
+          id={listId}
+          role="listbox"
+          aria-label={labels.mentionList}
+          className={styles.suggestionList}
+        >
           {searching && (
             <div className={styles.suggestionStatus} role="status">
               <Spinner size="tiny" />
@@ -249,30 +257,34 @@ export function CommentComposer({
             </div>
           )}
           {!searching && searchFailed && (
-            <div className={styles.suggestionStatus} role="status">{labels.mentionSearchFailed}</div>
+            <div className={styles.suggestionStatus} role="status">
+              {labels.mentionSearchFailed}
+            </div>
           )}
           {!searching && !searchFailed && suggestions.length === 0 && (
             <div className={styles.suggestionStatus}>{labels.noMentions}</div>
           )}
-          {!searching && !searchFailed && suggestions.map((suggestion, index) => (
-            <button
-              key={suggestion.id}
-              id={`${listId}-${index}`}
-              type="button"
-              role="option"
-              aria-selected={index === activeIndex}
-              className={styles.suggestion}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => chooseSuggestion(index)}
-            >
-              <Avatar
-                size={24}
-                name={suggestion.name}
-                image={suggestion.avatarUrl ? { src: suggestion.avatarUrl } : undefined}
-              />
-              {suggestion.name}
-            </button>
-          ))}
+          {!searching &&
+            !searchFailed &&
+            suggestions.map((suggestion, index) => (
+              <button
+                key={suggestion.id}
+                id={`${listId}-${index}`}
+                type="button"
+                role="option"
+                aria-selected={index === activeIndex}
+                className={styles.suggestion}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseSuggestion(index)}
+              >
+                <Avatar
+                  size={24}
+                  name={suggestion.name}
+                  image={suggestion.avatarUrl ? { src: suggestion.avatarUrl } : undefined}
+                />
+                {suggestion.name}
+              </button>
+            ))}
         </div>
       )}
       <div
@@ -280,12 +292,15 @@ export function CommentComposer({
         id={id}
         className={styles.editor}
         role="combobox"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
         aria-label={placeholder}
-        aria-multiline="true"
         aria-autocomplete="list"
         aria-expanded={listOpen}
         aria-controls={listOpen ? listId : undefined}
-        aria-activedescendant={suggestions.length && listOpen ? `${listId}-${activeIndex}` : undefined}
+        aria-activedescendant={
+          suggestions.length && listOpen ? `${listId}-${activeIndex}` : undefined
+        }
         contentEditable={!disabled}
         suppressContentEditableWarning
         data-placeholder={placeholder}
@@ -299,22 +314,37 @@ export function CommentComposer({
         onPaste={(event) => {
           event.preventDefault()
           const selection = window.getSelection()
-          if (!selection?.rangeCount) return
-          const range = selection.getRangeAt(0)
+          const element = event.currentTarget
+          const selectedRange = selection?.rangeCount ? selection.getRangeAt(0) : null
+          const range =
+            selectedRange && element.contains(selectedRange.commonAncestorContainer)
+              ? selectedRange
+              : document.createRange()
+          if (range !== selectedRange) {
+            range.selectNodeContents(element)
+            range.collapse(false)
+          }
           range.deleteContents()
           const text = document.createTextNode(event.clipboardData.getData('text/plain'))
           range.insertNode(text)
           range.setStartAfter(text)
           range.collapse(true)
-          selection.removeAllRanges()
-          selection.addRange(range)
+          selection?.removeAllRanges()
+          selection?.addRange(range)
           onChange(readEditor(event.currentTarget))
         }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return
-          if (listOpen && suggestions.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+          if (
+            listOpen &&
+            suggestions.length &&
+            (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+          ) {
             event.preventDefault()
-            setSelected((activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + suggestions.length) % suggestions.length)
+            setSelected(
+              (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + suggestions.length) %
+                suggestions.length,
+            )
           } else if (listOpen && event.key === 'Escape') {
             event.preventDefault()
             setDismissedQuery(query)
@@ -332,7 +362,15 @@ export function CommentComposer({
           aria-label={labels.sendReply}
           disabled={disabled || !value.trim()}
           onClick={onSubmit}
-          icon={<svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m3 3 14 7-14 7 2-7-2-7Zm2 7h12" stroke="currentColor" strokeLinejoin="round" /></svg>}
+          icon={
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path
+                d="m3 3 14 7-14 7 2-7-2-7Zm2 7h12"
+                stroke="currentColor"
+                strokeLinejoin="round"
+              />
+            </svg>
+          }
         />
       )}
     </div>

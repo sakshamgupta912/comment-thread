@@ -1,134 +1,140 @@
-# Reusable CommentThread Component: Final Checklist
+# Reusable CommentThread Component: Release Checklist
 
-Checklist for turning the Fluent UI comment-feed prototype into an npm package.
+**Audit date: 2026-11-04. Publication remains gated.**
 
-**Audit status (2026-11-03): not ready to publish.** The standalone package has an MIT license, but registry access, pagination issues, compatibility, accessibility, and CI checks remain open.
+The package and its automated release gates have been upgraded. Unchecked items are deliberately not represented as complete: npm ownership/account setup, manual accessibility acceptance, dependency-advisory review, and running the new workflows on GitHub require maintainer follow-through.
 
-Verified after the repository split: a clean demo install and build, lint, 8 unit tests, 17 Chromium browser tests, a 15-file package, and packed, local-Git, and GitHub ESM consumers installed through the internal registry and rendered on the server. The packed consumer also rendered and posted a comment in Chromium. An earlier publish dry run warned that registry login is required. Partial items remain unchecked.
+The consuming application owns authentication, authorization, data visibility, persistence, API calls, and complete comment-tree updates.
 
-## Goal and scope
+## 1. Prototype and consumer boundary
 
-Turn the Fluent UI comment-feed prototype into an npm package. The consuming app owns auth, persistence, authorization, and API calls. The component receives data and reports changes through its public API.
+- [x] Standalone package, separate from the Vite demo.
+- [x] No seed users, localStorage, or demo-only role/pagination controls in the library.
+- [x] Controlled-only API; no duplicate internal comment store.
+- [x] Nested replies, depth limit, expansion, plain-text mentions, responsive layout, and Fluent light/dark themes.
+- [x] Consumer-owned async creation and deletion, explicit failures, draft preservation, and retry.
+- [x] Client-side batch, show-all, and disabled pagination modes.
 
-Done when: a consumer can npm i the package, pass props and callbacks, and use it without editing source.
+## 2. Public API decisions
 
-## 1. Prototype status
-
-- [x] Fluent UI comment-feed UI built
-- [x] Nested replies, depth limit, expand/collapse
-- [x] @mentions with demo contacts
-- [x] Pagination and responsive layout
-- [x] Build, lint, unit tests, browser tests passing
-- [x] Demo data, localStorage, and demo-only UI moved out of the library into the demo app
-
-## 2. Public API design
-
-- [x] Standalone package separate from the Vite demo app
-- [x] Typed CommentThread export plus exported public types (Comment, Author, CommentThreadProps, etc.)
-- [x] Data via props (comments, currentUser); no hardcoded users or seed data
-- [ ] Stable types for comment ID, parent ID, author, ISO timestamp — IDs and author are typed, but `createdAt` is a string validated with `Date.parse`, not specifically as ISO.
-- [x] Controlled usage as the primary mode (comments + onCreate); decide whether to also offer uncontrolled (defaultComments) — controlled-only in v1.
-- [x] One required async callback, onCreate({ text, parentId }), for both new comments (parentId: null) and replies (parentId: parent comment ID)
-- [ ] Consumer updates comments after onCreate resolves; clear the draft on success and preserve it with an error on rejection — draft handling is implemented, but the demo and README update comments before the callback resolves. Confirm the intended ordering.
-- [x] Loading, empty, error, and read-only states
-- [ ] Configurable nesting depth and page size with sensible defaults — reducing `pageSize` at runtime can leave too many conversations visible.
-- [ ] Pagination supports batches, show-all, and disabled modes — switching from an expanded show-all view back to batches can retain the expanded state.
-- [ ] Configurable labels, placeholders, date formatting, localization — overrides exist, but some accessibility and error strings remain hard-coded.
-- [x] ref forwarding to the root element, className/style support, remaining props spread on root
-- [x] Defined behavior for duplicate IDs, missing parents, invalid dates, stale data
-- [x] Works with minimal props (only comments, currentUser, onCreate required)
-- [x] Every export treated as a public promise (keep internals unexported)
+- [x] Typed `CommentThread`, public types, and immutable `removeComment` subtree helper.
+- [x] Only `comments`, `currentUser`, and `onCreate` are required.
+- [x] Opaque non-empty string IDs, including `main` and IDs containing spaces; generated DOM IDs are encoded and instance-scoped.
+- [x] Four-digit-year ISO date-times with seconds and explicit timezone; invalid calendar dates, date-only strings, and timezone-less values are rejected.
+- [x] Consumer accepts/persists data and requests the controlled state update before resolving callbacks; React need not have committed the update yet.
+- [x] Successful creation clears the draft; failures retain it with an alert.
+- [x] Page-size and pagination-mode changes reset the root preview without discarding drafts.
+- [x] `onDelete` is opt-in; `canDelete` defaults to author-only and allows application-specific role policies.
+- [x] Deletion confirmation identifies the descendant count; the consumer removes the entire subtree, including replies by other authors.
+- [x] Pending deletion prevents duplicate callbacks and new submissions.
+- [x] Loading, empty, external error, and read-only states.
+- [x] Root HTML attributes, className/style, and forwarded ref.
+- [x] Root-only styling and provider tokens are the intentional customization contract; no unstable internal CSS selectors, slots, or render props are promised.
+- [x] All component-owned UI strings are configurable; supplied API errors remain the consumer's localization responsibility.
+- [x] Invalid trees fail explicitly; internal helpers remain inaccessible through package subpaths.
 
 ## 3. Consumer integrations
 
-- [x] Auth, authorization, API calls, persistence stay in the consumer
-- [x] No localStorage in the library
-- [x] Optional async contact-search callback for @mentions, with loading, no-results, and failure states
-- [x] Mention format decision: store inline tokens as `@[Name](userId)`, reusing the prototype format and keeping each comment self-contained
-- [x] Document the token grammar and parse tokens as plain text; treat `userId` as an opaque stable identifier, never render comment content as HTML
-- [x] Debounce async mention searches and ignore stale responses using cancellation or request IDs
-- [x] Documented optimistic vs server-confirmed update patterns
-- [x] Verified: consumer data changes re-render the feed correctly
-- [x] No hard dependency on any data-fetching library (consumers wire in their own, e.g. via callbacks)
+- [x] Optional debounced asynchronous mention search with cancellation, stale-response protection, loading, no-results, and failure states.
+- [x] Escaped inline mention-token grammar documented; user IDs remain opaque; user content is never interpreted as HTML.
+- [x] No dependency on a fetching library.
+- [x] Server-confirmed and optimistic update responsibilities documented.
+- [x] API creation/deletion/search examples, including explicit failed-response handling.
+- [x] Demo wires persisted deletion, icon-only bins, and an admin-mode override without pretending to provide authentication.
+- [x] Authorization, subtree-deletion policy, and comment-content visibility remain consumer/server responsibilities.
 
-## 4. UI, theming, accessibility
+## 4. UI, accessibility, SSR
 
-- [x] Uses host Fluent theme; no global styles imposed
-- [x] Documented whether consumer must wrap in FluentProvider
-- [ ] Griffel styles scoped, no collisions with host styles; renderer/SSR setup documented — styles are scoped, but collision testing and renderer/SSR setup documentation are incomplete.
-- [x] Responsive, light/dark themes verified
-- [ ] Customization points defined (class names, slots, render props) — root className/style are supported; slots and render props are not provided.
-- [x] Keyboard support for thread controls, replies, mention suggestions
-- [ ] Focus management after submit, reply, cancel — reply/cancel paths exist; post-submit focus has not been verified.
-- [x] Loading and submission errors announced accessibly
-- [ ] Multiline input, paste, IME composition verified — handlers exist, but these paths lack dedicated verification.
-- [ ] Screen reader, contrast, zoom, mobile checked — narrow-screen browser checks exist; the other checks are pending.
-- [x] User text rendered as text only; no dangerouslySetInnerHTML on comment or mention content
+- [x] Scoped Griffel styles, host FluentProvider/theme, and no global reset.
+- [x] Renderer-per-request SSR and Next.js App Router provider setup documented.
+- [x] Import/server-render safety without browser globals.
+- [x] Deterministic default timestamps during SSR/hydration; browser-relative formatting afterward.
+- [x] Multiple component instances have distinct editor/listbox/reply relationships.
+- [x] Keyboard replies, mention navigation, Escape/cancel, dialog focus trapping, and accessible icon labels.
+- [x] Successful submission restores composer focus unless the user moved elsewhere.
+- [x] Fluent-native restore-focus targets handle dialog cancellation; deletion restores a surviving composer/title.
+- [x] Plain-text paste, multiline submission, synthetic IME composition, and StrictMode callback assertions.
+- [x] Automated WCAG A/AA axe checks include light/dark themes, open dialog, and post-cancel state; no rules are disabled or dependency nodes excluded.
+- [x] Narrow-container layout, 200% zoom/reflow, and a host-style isolation check.
+- [ ] Native IME acceptance using a real input method.
+- [ ] NVDA and VoiceOver, real mobile devices, 400% browser zoom, OS text scaling, and forced-colors acceptance.
+- [ ] Consumer-specific themes, host resets, layouts, and screen-reader combinations validated by the consuming application.
 
-## 5. Package setup and compatibility
+## 5. Packaging and compatibility
 
-- [ ] Name (scoped, e.g. @scope/comment-thread), license, repository, version, publish ownership — MIT and the GitHub repository are declared; package name and publishing ownership are not confirmed.
-- [ ] Bundler: tsup or Vite library mode — the current build uses TypeScript to emit unbundled ESM; decide whether a bundler is required.
-- [x] Output ESM + .d.ts; ship CJS only if its smoke test passes — CJS is not shipped.
-- [x] exports map (with types first), main, module, types
-- [x] Files whitelist includes only intended component build artifacts, documentation, and license.
-- [ ] sideEffects set correctly for tree-shaking — set to false, but consumer tree-shaking has not been independently verified.
-- [ ] react, react-dom, @fluentui/react-components as peerDependencies; advertise only version ranges tested in CI — peers are declared, but the ranges are provisional and no CI matrix exists.
-- [x] react, react-dom, react/jsx-runtime, Fluent externalized in the build (no duplicate runtimes)
-- [x] Modern JSX runtime (consumers don't need import React)
-- [x] Confirm the "use client" directive is preserved in the built dist files for Next.js App Router compatibility
-- [x] SSR-safe: no window/document at import or render time — built ESM imported and rendered on the server without browser globals.
-- [x] No unintended runtime dependencies; build tools in devDependencies
-- [ ] Bundle size checked (size-limit or bundlephobia) — the package tarball is approximately 13 kB; a consumer bundle-size check is still needed.
-- [x] LICENSE file, .gitignore
+- [x] MIT license, repository metadata, and version declared.
+- [x] Intentional unbundled TypeScript ESM build; no unnecessary bundler or duplicated React/Fluent runtime.
+- [x] Import-only exports with nested types-first resolution, declarations, main/module/types metadata, and preserved `use client`.
+- [x] ESM is the only supported module format; CommonJS is not advertised.
+- [x] Explicit artifact allowlist includes dist, README, changelog, contributor/release documentation, license, and manifest.
+- [x] Side-effect-free helper import independently verified to exclude the React UI.
+- [x] React/React DOM and Fluent are peers; tooling remains in devDependencies.
+- [x] Clean Vite consumers use actual content-addressed tarballs, never source aliases or npm link.
+- [x] Packed ESM import, server render, public-type check, and production Vite build.
+- [x] Packed production Next.js 16.4.3 App Router consumer: SSR, Griffel styles, hydration, posting, deletion.
+- [x] Executable gzip budgets: helper 4 KiB, component with peers external 20 KiB; package tarball budget 30 KiB.
+- [ ] Confirm legal/npm ownership and package-name availability. `@fluent/comment-thread` is provisional; GitHub repository ownership does not confer ownership of the npm scope.
 
-## 6. Tests and quality gates
+## 6. Automated quality gates
 
-- [x] Unit tests: nested replies, depth limits, invalid operations
-- [x] Unit tests: mention parsing, invalid saved data
-- [x] Browser tests: posting, mention selection, pagination, narrow screen
-- [ ] Test runtime reductions of `pageSize` and switching from expanded show-all back to batches
-- [x] Tests for the controlled API and consumer callbacks
-- [x] Tests for loading, empty, error, read-only, async mention-search states
-- [ ] StrictMode compatibility test (effects run twice in dev) — the demo uses StrictMode, but there is no dedicated double-effect assertion.
-- [ ] eslint-plugin-react-hooks and jsx-a11y enabled; Prettier configured — react-hooks is enabled; jsx-a11y and Prettier are not configured.
-- [ ] npx publint clean
-- [ ] npx @arethetypeswrong/cli --pack . clean (types resolve for every shipped module format)
-- [x] Package smoke test using the packed .tgz (not npm link) in a clean consumer app, ideally Vite and Next.js — verified with Vite/Chromium and server rendering; Next.js remains a separate open item.
-- [x] Install from a local Git URL and GitHub using the internal registry — `prepare` built the package and the installed ESM rendered on the server in both cases.
-- [x] Smoke-test every shipped module format, including CJS if provided — ESM is the only shipped format.
-- [ ] Smoke-test the packed package in a Next.js App Router app
-- [ ] CI matrix covers each supported React version
-- [ ] CI runs build, type-check, lint, unit, browser, and smoke tests on every PR
+- [x] Unit/SSR tests for indexing, invalid trees, timestamps, mention escaping, deletion, permissions, localization, and browser-global-free rendering.
+- [x] Browser regression tests for runtime page-size reductions and expanded show-all to batches.
+- [x] Controlled callbacks, pending states, failures, draft independence, focus, multi-instance IDs, paste, composition, and StrictMode.
+- [x] Chromium, Firefox, and WebKit projects use an isolated packed consumer.
+- [x] React Hooks and JSX accessibility ESLint rules plus Prettier configuration.
+- [x] publint and Are the Types Wrong for the declared ESM-only resolution profile.
+- [x] Standalone CI configuration covers Node 22/24 and React 18.3.1/19.3.1, with packed Next.js on the React 19 job.
+- [ ] Execute the new CI workflow on GitHub after reviewed changes are committed and pushed.
+- [ ] Review remaining development-tool advisories. npm reports 13 moderate findings stemming from minimatch <11.0.1; do not force incompatible major overrides into ESLint's older minimatch APIs.
 
 ## 7. Documentation
 
-- [ ] README: install command, supported React/Fluent/browser versions, peer deps — peer ranges are listed; install and browser support remain incomplete.
-- [ ] Minimal working example with consumer data and callbacks — the example requires a consumer-supplied `api`.
-- [ ] Props table: types, defaults, callback semantics
-- [ ] Fluent provider, theme, and customization requirements — provider and theme are documented; customization limits need fuller documentation.
-- [ ] How to connect an API, handle errors, implement mentions — callback and token behavior are described; complete integration examples are still needed.
-- [ ] Accessibility behavior and consumer responsibilities
-- [x] SSR / Next.js usage note
-- [x] Demo app (or Storybook) that consumes the package like an npm user — the separate demo imports the sibling package as a local dependency.
-- [ ] CHANGELOG.md
-- [ ] Build, test, pack, publish workflow documented (optionally CONTRIBUTING.md) — build, test, and pack commands are documented; publishing is not.
+- [x] Install instructions, peers, tested runtimes/browser policy, and minimal self-contained example.
+- [x] Props/types/defaults table, callback timing, timestamp/ID validation, and stale-target behavior.
+- [x] Mention grammar and full create/delete/search integration examples.
+- [x] Theme, root-only customization, SSR renderer setup, and App Router provider.
+- [x] Keyboard behavior, focus, announcements, and consumer accessibility responsibilities.
+- [x] Changelog and single-package SemVer/version-tag policy.
+- [x] Build, check, browser, packed-consumer, Next.js, size-budget, and protected release instructions.
+- [x] Manual accessibility and publication blockers explicitly documented rather than checked off.
 
 ## 8. Release
 
-- [ ] npm account with 2FA; package name availability checked (npm view <name>)
-- [ ] Changesets (or equivalent) set up; semver followed
-- [x] npm pack --dry-run: confirm contents
-- [x] Install the packed artifact in a clean app and run it — the isolated Vite consumer rendered and submitted a comment.
-- [ ] Review license, dependency metadata, README, published file list
-- [ ] npm publish --dry-run, then npm publish --access public (required for scoped public packages) — an earlier dry run of the combined layout warned that registry login is required; repeat it for the standalone package. No publication was attempted.
-- [ ] Automated release via GitHub Actions, with --provenance
-- [ ] Publish only after every check above passes
+- [x] Automated artifact/size/content checks and npm pack dry-run path.
+- [x] Guarded GitHub Actions publication configuration with provenance, validated version tag, and prerequisite CI.
+- [x] Publishing disabled unless `NPM_RELEASE_APPROVED` is explicitly enabled.
+- [ ] Confirm npm account/scope access and configure 2FA in npm.
+- [ ] Configure trusted publishing and a protected GitHub `npm` environment with required reviewers.
+- [ ] Verify public-registry access. A direct npmjs query failed TLS negotiation in this environment; the approved internal proxy was used for dependency installation.
+- [ ] Complete legal, dependency-advisory, manual accessibility, and CI-run acceptance.
+- [x] Run standalone pack and public-registry publish dry runs. The unauthenticated dry run passed with npm's login warning; this does not establish scope access or account readiness.
+- [ ] Approve the release, commit/tag the reviewed version, and publish. No real publication, credentials, permissions, repository settings, or releases were created by this task.
 
-## Suggested order of attack
+## Validation evidence
 
-1. Section 1: decouple demo code from the library
-2. Sections 2 and 3: settle the public API and consumer boundary
-3. Section 5: build and packaging setup
-4. Section 6: run npm pack and the smoke test early, since it surfaces most packaging bugs
-5. Sections 4, 7, 8: theming and accessibility polish, documentation, release
+Locally verified on Windows with Node 26.13.0 and Fluent 9.75.1:
+
+| Gate                               | Result                                                                  |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| Library unit/SSR tests             | 8 passed                                                                |
+| Packed React 19.3.1 consumer       | 30 passed across Chromium, Firefox, and WebKit                          |
+| Packed React 18.3.1 consumer       | 30 passed across Chromium, Firefox, and WebKit                          |
+| Light/dark axe scans               | Passed before, during, and after the delete dialog in all three engines |
+| Next.js 16.4.3 production consumer | SSR, styles, hydration, posting, and deletion passed                    |
+| Demo regression suite              | 5 unit tests and 21 browser tests passed; build and lint passed         |
+| Library quality gates              | ESLint, Prettier, publint, ESM-only ATTW, and build passed              |
+| Manifest/lockfile metadata         | Name, version, dependencies, peers, and engines agree                   |
+| Helper/component gzip size         | 1,033 / 8,883 bytes; both below budget                                  |
+| Tarball dry run                    | 17 intended files, approximately 22.3 kB compressed; below 30 KiB       |
+| Publication dry run                | Passed; no real publication or authenticated registry check             |
+
+Use the executable gates instead of treating this document as a substitute for tests:
+
+```sh
+npm run check
+npm run test:browser
+npm run test:next
+npm pack --dry-run
+```
+
+The compatibility CI and release workflow are configuration until they have run on GitHub. Human/credential-dependent checks above must remain open until an authorized maintainer performs them.

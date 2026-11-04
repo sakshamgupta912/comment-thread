@@ -1,0 +1,43 @@
+name: Validate package
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+        react: ['18.3.1', '19.3.1']
+    env:
+      TEST_REACT_VERSION: ${{ matrix.react }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Test the selected React runtime
+        run: npm install --no-save react@${{ matrix.react }} react-dom@${{ matrix.react }}
+      - run: npm run check
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:browser
+      - name: Test Next.js App Router with React 19
+        if: matrix.node == 24 && matrix.react == '19.3.1'
+        run: npm run test:next
+      - name: Save browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-results-node-${{ matrix.node }}-react-${{ matrix.react }}
+          path: test-results
+          if-no-files-found: ignore
