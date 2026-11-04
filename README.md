@@ -1,6 +1,7 @@
 # `@fluent/comment-thread`
 
 A reusable, controlled React comment thread built with Fluent UI React Components.
+<img width="1085" height="876" alt="image" src="https://github.com/user-attachments/assets/97a4c8f0-dedb-4888-b85b-ed16ea3ac63e" />
 
 This repository contains the package only. The Vite demo lives in a separate repository. The package is licensed under MIT.
 
