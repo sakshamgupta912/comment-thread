@@ -23,8 +23,14 @@ import {
 } from '@fluentui/react-components'
 import { CommentComposer } from './CommentComposer.js'
 import { parseMentions } from './mentions.js'
+import { formatRelativeTime } from './relative-time.js'
 import { createCommentIndex } from './thread-data.js'
-import type { Comment, CommentThreadLabels, CommentThreadProps } from './types.js'
+import type {
+  Comment,
+  CommentThreadError,
+  CommentThreadLabels,
+  CommentThreadProps,
+} from './types.js'
 
 const defaultLabels: CommentThreadLabels = {
   title: 'Comment feed',
@@ -280,15 +286,6 @@ const useStyles = makeStyles({
   },
 })
 
-function formatRelativeTime(date: Date): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000))
-  const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'short' })
-  if (seconds >= 86400) return relative.format(-Math.floor(seconds / 86400), 'day')
-  if (seconds >= 3600) return relative.format(-Math.floor(seconds / 3600), 'hour')
-  if (seconds >= 60) return relative.format(-Math.floor(seconds / 60), 'minute')
-  return relative.format(-seconds, 'second')
-}
-
 function CommentText({ text }: { text: string }) {
   const styles = useStyles()
   return parseMentions(text).map((part, index) =>
@@ -350,10 +347,15 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
     onDelete,
     canDelete = (comment, user) => comment.author.id === user.id,
     contactSearch,
+    mentionLimit,
+    filterMentionSuggestions,
+    renderError,
     loading = false,
     error = null,
     readOnly = false,
     maxDepth = 3,
+    maxNestingDepth = Infinity,
+    headingLevel = 2,
     pagination = true,
     pageSize = 2,
     formatDate,
@@ -382,35 +384,61 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState<Record<string, boolean>>({})
-  const [submitErrors, setSubmitErrors] = useState<Record<string, string>>({})
+  const [submitErrors, setSubmitErrors] = useState<Record<string, CommentThreadError>>({})
   const pending = useRef(new Set<string>())
   const [deleteDialogMounted, setDeleteDialogMounted] = useState(false)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<CommentThreadError | null>(null)
   const deletePending = useRef(false)
   const deleteTrigger = useRef<HTMLButtonElement | null>(null)
   const deleteSurface = useRef<HTMLDivElement>(null)
   const titleRef = useRef<HTMLHeadingElement>(null)
-  const labels = { ...defaultLabels, ...labelOverrides }
+  const labels: CommentThreadLabels = {
+    ...defaultLabels,
+    // An explicit undefined (for example from a partial translation table) must not erase a default.
+    ...(Object.fromEntries(
+      Object.entries(labelOverrides ?? {}).filter(
+        ([, value]) => value !== undefined && value !== null,
+      ),
+    ) as Partial<CommentThreadLabels>),
+  }
   const depthLimit = Number.isFinite(maxDepth) ? Math.max(0, Math.floor(maxDepth)) : 3
+  // Replies nested deeper than this are listed flat under their ancestor instead of indenting
+  // further, so the DOM stays shallow however deep the data is.
+  const flattenFromDepth = Math.max(10, depthLimit)
+  const Heading =
+    `h${Number.isInteger(headingLevel) && headingLevel >= 1 && headingLevel <= 6 ? headingLevel : 2}` as
+      'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
+  const nestingLimit = Number.isFinite(maxNestingDepth)
+    ? Math.max(0, Math.floor(maxNestingDepth))
+    : Infinity
   const indexResult = useMemo(() => {
     try {
-      return { index: createCommentIndex(comments), error: null }
+      return { index: createCommentIndex(comments, nestingLimit), failure: null }
     } catch (cause) {
-      return {
-        index: null,
-        error: cause instanceof Error ? cause.message : '',
-      }
+      return { index: null, failure: cause }
     }
-  }, [comments])
+  }, [comments, nestingLimit])
   const index = indexResult.index
   const roots = index?.roots ?? []
   const visibleRoots =
     !pagination || visibleCount === 'all'
       ? roots
       : roots.slice(0, Math.max(visibleCount, itemsPerPage))
-  const globalError = index === null ? labels.invalidComments(indexResult.error ?? '') : error
+  const globalException: CommentThreadError | null =
+    index === null
+      ? {
+          type: 'invalid-comments',
+          message: labels.invalidComments(
+            indexResult.failure instanceof Error ? indexResult.failure.message : '',
+          ),
+          cause: indexResult.failure,
+        }
+      : error
+        ? { type: 'load', message: error }
+        : null
+  const globalError = globalException?.message ?? null
   const deleteTarget = deleteTargetId === null ? undefined : index?.byId.get(deleteTargetId)
   const deleteAllowed = Boolean(
     onDelete &&
@@ -422,10 +450,11 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
   )
 
   function descendants(id: string): number {
-    return (index?.childrenByParent.get(id) ?? []).reduce(
-      (total, child) => total + 1 + descendants(child.id),
-      0,
-    )
+    return index?.descendantCountById.get(id) ?? 0
+  }
+
+  function childrenOf(comment: Comment): Comment[] {
+    return index?.childrenByParent.get(comment.id) ?? []
   }
 
   function submit(draftId: string, parentId: string | null, editorId: string) {
@@ -443,13 +472,18 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
     pending.current.add(draftId)
     const focusedElement = document.activeElement
     setSubmitting((previous) => ({ ...previous, [draftId]: true }))
-    setSubmitErrors((previous) => ({ ...previous, [draftId]: '' }))
+    setSubmitErrors((previous) => {
+      const next = { ...previous }
+      delete next[draftId]
+      return next
+    })
 
     void Promise.resolve()
       .then(() => onCreate({ text: text.trim(), parentId }))
       .then(() => {
         setDrafts((previous) => ({ ...previous, [draftId]: '' }))
-        setReplyTargetId(null)
+        // Keep a reply target the user picked elsewhere while this request was pending.
+        setReplyTargetId((current) => (current === parentId ? null : current))
         window.requestAnimationFrame(() => {
           if (
             document.activeElement === focusedElement ||
@@ -462,7 +496,11 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
       .catch((cause: unknown) => {
         setSubmitErrors((previous) => ({
           ...previous,
-          [draftId]: cause instanceof Error && cause.message ? cause.message : labels.postFailed,
+          [draftId]: {
+            type: 'post',
+            message: cause instanceof Error && cause.message ? cause.message : labels.postFailed,
+            cause,
+          },
         }))
       })
       .finally(() => {
@@ -473,7 +511,13 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
 
   function updateDraft(id: string, value: string) {
     setDrafts((previous) => ({ ...previous, [id]: value }))
-    if (submitErrors[id]) setSubmitErrors((previous) => ({ ...previous, [id]: '' }))
+    if (submitErrors[id]) {
+      setSubmitErrors((previous) => {
+        const next = { ...previous }
+        delete next[id]
+        return next
+      })
+    }
   }
 
   function closeDeleteDialog() {
@@ -510,17 +554,66 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
       await onDelete(deleteTarget)
       closeDeleteDialog()
     } catch (cause: unknown) {
-      setDeleteError(cause instanceof Error && cause.message ? cause.message : labels.deleteFailed)
+      setDeleteError({
+        type: 'delete',
+        message: cause instanceof Error && cause.message ? cause.message : labels.deleteFailed,
+        cause,
+      })
     } finally {
       deletePending.current = false
       setDeleting(false)
     }
   }
 
-  function renderComment(comment: Comment): ReactNode {
+  // Builds a thread deepest-first from a breadth-first ordering, so that no JavaScript call depth
+  // grows with the nesting of the replies. Comments from flattenFromDepth down are not nested
+  // further: their whole subtree is listed in reading order under the ancestor at that depth.
+  function renderThread(root: Comment): ReactNode {
+    const order = [root]
+    for (let cursor = 0; cursor < order.length; cursor++) {
+      const comment = order[cursor]
+      if (index!.depthById.get(comment.id)! >= flattenFromDepth) continue
+      for (const child of childrenOf(comment)) order.push(child)
+    }
+    const rendered = new Map<string, ReactNode>()
+    for (let position = order.length - 1; position >= 0; position--) {
+      const comment = order[position]
+      rendered.set(
+        comment.id,
+        renderComment(
+          comment,
+          index!.depthById.get(comment.id)! >= flattenFromDepth
+            ? renderFlatReplies(comment)
+            : childrenOf(comment).map((child) => rendered.get(child.id)),
+        ),
+      )
+    }
+    return rendered.get(root.id)
+  }
+
+  function renderFlatReplies(ancestor: Comment): ReactNode[] {
+    const rows: ReactNode[] = []
+    // Popping from the end yields reading order, so children are pushed last-first.
+    const pending = [...childrenOf(ancestor)].reverse()
+    while (pending.length > 0) {
+      const comment = pending.pop()!
+      rows.push(renderComment(comment, []))
+      const children = childrenOf(comment)
+      for (let position = children.length - 1; position >= 0; position--) {
+        pending.push(children[position])
+      }
+    }
+    return rows
+  }
+
+  function renderComment(comment: Comment, replies: ReactNode[]): ReactNode {
     const depth = index!.depthById.get(comment.id)!
-    const children = index!.childrenByParent.get(comment.id) ?? []
     const name = comment.author.name
+    const createdAt = new Date(comment.createdAt)
+    const authorId = `${instanceId}-author-${encodeURIComponent(comment.id)}`
+    const timeId = `${instanceId}-time-${encodeURIComponent(comment.id)}`
+    // The action names stay short; the description tells assistive technology whose comment it is.
+    const describedBy = `${authorId} ${timeId}`
     return (
       <div key={comment.id} className={styles.avatarRow}>
         <Avatar
@@ -531,19 +624,20 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
         <div className={styles.content}>
           <div className={styles.commentHeader}>
             <div className={styles.authorRow}>
-              <Text className={styles.author} weight="semibold">
+              <Text id={authorId} className={styles.author} weight="semibold">
                 {name}
               </Text>
               <time
+                id={timeId}
                 className={styles.timestamp}
                 dateTime={comment.createdAt}
-                title={new Date(comment.createdAt).toISOString()}
+                title={createdAt.toISOString()}
               >
                 {formatDate
-                  ? formatDate(new Date(comment.createdAt))
+                  ? formatDate(createdAt)
                   : hydrated
-                    ? formatRelativeTime(new Date(comment.createdAt))
-                    : new Date(comment.createdAt).toISOString()}
+                    ? formatRelativeTime(createdAt)
+                    : createdAt.toISOString()}
               </time>
             </div>
             {onDelete && !readOnly && canDelete(comment, currentUser) && (
@@ -554,6 +648,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                 className={styles.deleteAction}
                 icon={<DeleteIcon />}
                 aria-label={labels.delete}
+                aria-describedby={describedBy}
                 title={labels.delete}
                 disabled={deleting || Object.values(submitting).some(Boolean)}
                 onClick={(event) => {
@@ -575,6 +670,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                 appearance="subtle"
                 size="small"
                 icon={<ReplyIcon />}
+                aria-describedby={describedBy}
                 disabled={deleting}
                 onClick={() => {
                   setReplyTargetId(comment.id)
@@ -606,7 +702,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
               </Button>
             )}
           </div>
-          {children.length > 0 && (
+          {replies.length > 0 && (
             <div
               className={styles.replies}
               id={
@@ -614,7 +710,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
               }
               hidden={depth === 0 && !expanded.has(comment.id)}
             >
-              {children.map(renderComment)}
+              {replies}
             </div>
           )}
         </div>
@@ -644,11 +740,14 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
               <DialogContent>
                 {deleteTarget &&
                   labels.deleteConfirmation(deleteTarget, descendants(deleteTarget.id))}
-                {deleteError && (
-                  <MessageBar intent="error" role="alert">
-                    <MessageBarBody>{deleteError}</MessageBarBody>
-                  </MessageBar>
-                )}
+                {deleteError &&
+                  (renderError ? (
+                    renderError(deleteError)
+                  ) : (
+                    <MessageBar intent="error" role="alert">
+                      <MessageBarBody>{deleteError.message}</MessageBarBody>
+                    </MessageBar>
+                  ))}
               </DialogContent>
               <DialogActions>
                 <Button disabled={deleting} onClick={closeDeleteDialog}>
@@ -670,20 +769,23 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
         </Dialog>
       )}
       <Card appearance="outline" className={styles.feed}>
-        <header className={styles.header}>
-          <h2 ref={titleRef} tabIndex={-1} className={styles.title}>
+        <div className={styles.header}>
+          <Heading ref={titleRef} tabIndex={-1} className={styles.title}>
             {labels.title}
-          </h2>
+          </Heading>
           <Text className={styles.muted} aria-live="polite">
             {labels.commentsCount(comments.length)}
           </Text>
-        </header>
+        </div>
 
-        {globalError && (
-          <MessageBar intent="error" role="alert" className={styles.error}>
-            <MessageBarBody>{globalError}</MessageBarBody>
-          </MessageBar>
-        )}
+        {globalError &&
+          (renderError ? (
+            renderError(globalException!)
+          ) : (
+            <MessageBar intent="error" role="alert" className={styles.error}>
+              <MessageBarBody>{globalError}</MessageBarBody>
+            </MessageBar>
+          ))}
 
         {loading && (
           <div role="status" className={styles.empty}>
@@ -715,9 +817,9 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                 className={styles.thread}
                 aria-label={`${labels.title}: ${root.author.name}`}
               >
-                {renderComment(root)}
+                {renderThread(root)}
                 {!readOnly && (
-                  <footer className={styles.footer}>
+                  <div className={styles.footer}>
                     <div className={styles.avatarRow}>
                       <Avatar
                         size={avatarSize}
@@ -759,18 +861,24 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                           }
                           labels={labels}
                           contactSearch={contactSearch}
+                          mentionLimit={mentionLimit}
+                          filterMentionSuggestions={filterMentionSuggestions}
+                          renderError={renderError}
                           disabled={loading || isSubmitting || deleting || Boolean(globalError)}
                           sendButton
                           focusOnReply={isReplying}
                         />
                       </div>
                     </div>
-                    {submitErrors[draftId] && (
-                      <MessageBar intent="error" role="alert">
-                        <MessageBarBody>{submitErrors[draftId]}</MessageBarBody>
-                      </MessageBar>
-                    )}
-                  </footer>
+                    {submitErrors[draftId] &&
+                      (renderError ? (
+                        renderError(submitErrors[draftId])
+                      ) : (
+                        <MessageBar intent="error" role="alert">
+                          <MessageBarBody>{submitErrors[draftId].message}</MessageBarBody>
+                        </MessageBar>
+                      ))}
+                  </div>
                 )}
               </article>
             )
@@ -818,7 +926,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                 </div>
               )}
             {!readOnly && (
-              <footer className={styles.mainFooter}>
+              <div className={styles.mainFooter}>
                 <div className={styles.avatarRow}>
                   <Avatar
                     size={avatarSize}
@@ -833,16 +941,22 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                     placeholder={labels.newConversation}
                     labels={labels}
                     contactSearch={contactSearch}
+                    mentionLimit={mentionLimit}
+                    filterMentionSuggestions={filterMentionSuggestions}
+                    renderError={renderError}
                     disabled={
                       loading || Boolean(submitting.main) || deleting || Boolean(globalError)
                     }
                   />
                 </div>
-                {submitErrors.main && (
-                  <MessageBar intent="error" role="alert">
-                    <MessageBarBody>{submitErrors.main}</MessageBarBody>
-                  </MessageBar>
-                )}
+                {submitErrors.main &&
+                  (renderError ? (
+                    renderError(submitErrors.main)
+                  ) : (
+                    <MessageBar intent="error" role="alert">
+                      <MessageBarBody>{submitErrors.main.message}</MessageBarBody>
+                    </MessageBar>
+                  ))}
                 <div className={styles.postRow}>
                   <Button
                     appearance="primary"
@@ -858,7 +972,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                     {submitting.main ? labels.posting : labels.post}
                   </Button>
                 </div>
-              </footer>
+              </div>
             )}
           </>
         )}

@@ -1,4 +1,4 @@
-import type { HTMLAttributes } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 
 export interface CommentAuthor {
   id: string
@@ -16,6 +16,15 @@ export interface Comment {
 }
 
 export type MentionSuggestion = CommentAuthor
+
+export type CommentThreadErrorType =
+  'load' | 'invalid-comments' | 'post' | 'delete' | 'mention-search'
+
+export interface CommentThreadError {
+  type: CommentThreadErrorType
+  message: string
+  cause?: unknown
+}
 
 export interface CreateCommentInput {
   text: string
@@ -64,10 +73,24 @@ export interface CommentThreadProps extends Omit<HTMLAttributes<HTMLDivElement>,
   canDelete?: (comment: Comment, currentUser: CommentAuthor) => boolean
   /** Receives an empty query when the user types @ without a search term. */
   contactSearch?: (query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>
+  /** Maximum number of mention suggestions rendered. Omit to render all returned suggestions. */
+  mentionLimit?: number
+  /** Additional consumer-defined criteria applied to returned mention suggestions. */
+  filterMentionSuggestions?: (suggestion: MentionSuggestion, query: string) => boolean
+  /** Replaces the default error surface for any component-handled exception. */
+  renderError?: (error: CommentThreadError) => ReactNode
   loading?: boolean
   error?: string | null
   readOnly?: boolean
   maxDepth?: number
+  /**
+   * Comments nested deeper than this (root comments are depth 0) are rejected as invalid data.
+   * Unlimited by default: replies nested deeper than ten levels (or `maxDepth`, if larger) are
+   * listed flat under their ancestor, so deep data stays safe to render. Set this to reject it.
+   */
+  maxNestingDepth?: number
+  /** Level of the title heading, so it fits the host page's outline. Defaults to 2. */
+  headingLevel?: 1 | 2 | 3 | 4 | 5 | 6
   /** Use 'show-all' for a preview that expands fully, or false to show everything without controls. */
   pagination?: boolean | 'show-all'
   pageSize?: number

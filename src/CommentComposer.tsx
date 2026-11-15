@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useId, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Avatar, Button, makeStyles, Spinner, tokens } from '@fluentui/react-components'
-import { getMentionQuery, parseMentions, serializeMention } from './mentions.js'
-import type { CommentThreadLabels, MentionSuggestion } from './types.js'
+import { getMentionQuery, insertMention, parseMentions, serializeMention } from './mentions.js'
+import type { CommentThreadError, CommentThreadLabels, MentionSuggestion } from './types.js'
 
 const useStyles = makeStyles({
   composer: {
@@ -105,6 +106,9 @@ interface CommentComposerProps {
   placeholder: string
   labels: CommentThreadLabels
   contactSearch?: (query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>
+  mentionLimit?: number
+  filterMentionSuggestions?: (suggestion: MentionSuggestion, query: string) => boolean
+  renderError?: (error: CommentThreadError) => ReactNode
   disabled?: boolean
   sendButton?: boolean
   focusOnReply?: boolean
@@ -135,6 +139,9 @@ export function CommentComposer({
   placeholder,
   labels,
   contactSearch,
+  mentionLimit,
+  filterMentionSuggestions,
+  renderError,
   disabled = false,
   sendButton = false,
   focusOnReply = false,
@@ -150,6 +157,7 @@ export function CommentComposer({
     suggestions: MentionSuggestion[]
     loading: boolean
     failed: boolean
+    cause?: unknown
   }>({ query: null, suggestions: [], loading: false, failed: false })
   const query = getMentionQuery(value)
   const showSuggestions =
@@ -159,6 +167,10 @@ export function CommentComposer({
   const searching = showSuggestions && (!hasCurrentSearch || searchResult.loading)
   const searchFailed = hasCurrentSearch && searchResult.failed
   const activeIndex = Math.min(selected, Math.max(0, suggestions.length - 1))
+  const suggestionLimit =
+    mentionLimit === undefined || !Number.isFinite(mentionLimit)
+      ? undefined
+      : Math.max(0, Math.floor(mentionLimit))
 
   useEffect(() => {
     if (!showSuggestions || query === null || !contactSearch) return
@@ -170,16 +182,20 @@ export function CommentComposer({
       try {
         const results = await contactSearch(query, controller.signal)
         if (active && !controller.signal.aborted) {
+          const validResults = results
+            .filter((item) => item.id.trim() && item.name.trim())
+            .filter((item) => filterMentionSuggestions?.(item, query) ?? true)
           setSearchResult({
             query,
-            suggestions: results.filter((item) => item.id.trim() && item.name.trim()),
+            suggestions:
+              suggestionLimit === undefined ? validResults : validResults.slice(0, suggestionLimit),
             loading: false,
             failed: false,
           })
         }
-      } catch {
+      } catch (cause) {
         if (active && !controller.signal.aborted) {
-          setSearchResult({ query, suggestions: [], loading: false, failed: true })
+          setSearchResult({ query, suggestions: [], loading: false, failed: true, cause })
         }
       }
     }, 200)
@@ -189,7 +205,7 @@ export function CommentComposer({
       window.clearTimeout(timeout)
       controller.abort()
     }
-  }, [contactSearch, query, showSuggestions])
+  }, [contactSearch, filterMentionSuggestions, query, showSuggestions, suggestionLimit])
 
   useEffect(() => {
     if (focusOnReply) editor.current?.focus()
@@ -223,12 +239,7 @@ export function CommentComposer({
   function chooseSuggestion(index: number) {
     const suggestion = suggestions[index]
     if (!suggestion || query === null) return
-    onChange(
-      value.replace(/(?:^|\s)@[\w]*$/, (match) => {
-        const prefix = match.startsWith('@') ? '' : match.slice(0, match.lastIndexOf('@'))
-        return `${prefix}${serializeMention(suggestion)} `
-      }),
-    )
+    onChange(insertMention(value, suggestion))
     setSelected(0)
     setDismissedQuery(null)
     editor.current?.focus()
@@ -240,51 +251,61 @@ export function CommentComposer({
       searchFailed ||
       suggestions.length > 0 ||
       (hasCurrentSearch && !searchResult.loading))
+  // Only a list that actually has options is a listbox; loading, empty, and error messages are
+  // announced as statuses beside it because a listbox may not contain anything but options.
+  const optionsOpen = listOpen && suggestions.length > 0
 
   return (
     <div className={styles.composer}>
       {listOpen && (
-        <div
-          id={listId}
-          role="listbox"
-          aria-label={labels.mentionList}
-          className={styles.suggestionList}
-        >
+        <div className={styles.suggestionList}>
           {searching && (
             <div className={styles.suggestionStatus} role="status">
-              <Spinner size="tiny" />
+              <Spinner size="tiny" aria-hidden="true" />
               {labels.loading}
             </div>
           )}
-          {!searching && searchFailed && (
+          {!searching &&
+            searchFailed &&
+            (renderError ? (
+              renderError({
+                type: 'mention-search',
+                message: labels.mentionSearchFailed,
+                cause: searchResult.cause,
+              })
+            ) : (
+              <div className={styles.suggestionStatus} role="status">
+                {labels.mentionSearchFailed}
+              </div>
+            ))}
+          {!searching && !searchFailed && suggestions.length === 0 && (
             <div className={styles.suggestionStatus} role="status">
-              {labels.mentionSearchFailed}
+              {labels.noMentions}
             </div>
           )}
-          {!searching && !searchFailed && suggestions.length === 0 && (
-            <div className={styles.suggestionStatus}>{labels.noMentions}</div>
+          {optionsOpen && (
+            <div id={listId} role="listbox" aria-label={labels.mentionList}>
+              {suggestions.map((suggestion, index) => (
+                <button
+                  key={suggestion.id}
+                  id={`${listId}-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  className={styles.suggestion}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => chooseSuggestion(index)}
+                >
+                  <Avatar
+                    size={24}
+                    name={suggestion.name}
+                    image={suggestion.avatarUrl ? { src: suggestion.avatarUrl } : undefined}
+                  />
+                  {suggestion.name}
+                </button>
+              ))}
+            </div>
           )}
-          {!searching &&
-            !searchFailed &&
-            suggestions.map((suggestion, index) => (
-              <button
-                key={suggestion.id}
-                id={`${listId}-${index}`}
-                type="button"
-                role="option"
-                aria-selected={index === activeIndex}
-                className={styles.suggestion}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => chooseSuggestion(index)}
-              >
-                <Avatar
-                  size={24}
-                  name={suggestion.name}
-                  image={suggestion.avatarUrl ? { src: suggestion.avatarUrl } : undefined}
-                />
-                {suggestion.name}
-              </button>
-            ))}
         </div>
       )}
       <div
@@ -296,11 +317,9 @@ export function CommentComposer({
         aria-disabled={disabled}
         aria-label={placeholder}
         aria-autocomplete="list"
-        aria-expanded={listOpen}
-        aria-controls={listOpen ? listId : undefined}
-        aria-activedescendant={
-          suggestions.length && listOpen ? `${listId}-${activeIndex}` : undefined
-        }
+        aria-expanded={optionsOpen}
+        aria-controls={optionsOpen ? listId : undefined}
+        aria-activedescendant={optionsOpen ? `${listId}-${activeIndex}` : undefined}
         contentEditable={!disabled}
         suppressContentEditableWarning
         data-placeholder={placeholder}
@@ -334,7 +353,9 @@ export function CommentComposer({
           onChange(readEditor(event.currentTarget))
         }}
         onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) return
+          // Safari fires compositionend before the keydown that confirms an IME candidate, so
+          // isComposing is already false there; keyCode 229 still marks it as IME input.
+          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
           if (
             listOpen &&
             suggestions.length &&

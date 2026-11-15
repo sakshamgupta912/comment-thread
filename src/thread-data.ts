@@ -6,6 +6,12 @@ export interface CommentIndex {
   childrenByParent: Map<string, Comment[]>
   depthById: Map<string, number>
   rootIdById: Map<string, string>
+  /** Total replies below each comment, at every level. */
+  descendantCountById: Map<string, number>
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== ''
 }
 
 function isTimestamp(value: string): boolean {
@@ -38,12 +44,16 @@ export function removeComment(comments: Comment[], commentId: string): Comment[]
   return comments.filter((comment) => !removed.has(comment.id))
 }
 
-export function createCommentIndex(comments: Comment[]): CommentIndex {
+/**
+ * Validates the comments and indexes them. Comments nested deeper than `maxNestingDepth` (root
+ * comments are depth 0) are rejected as invalid; the default is unlimited.
+ */
+export function createCommentIndex(comments: Comment[], maxNestingDepth = Infinity): CommentIndex {
   const byId = new Map<string, Comment>()
   for (const comment of comments) {
-    if (!comment.id.trim()) throw new Error('Every comment must have a non-empty ID.')
+    if (!isNonEmptyString(comment?.id)) throw new Error('Every comment must have a non-empty ID.')
     if (byId.has(comment.id)) throw new Error(`Duplicate comment ID: ${comment.id}`)
-    if (!comment.author.id.trim() || !comment.author.name.trim()) {
+    if (!isNonEmptyString(comment.author?.id) || !isNonEmptyString(comment.author.name)) {
       throw new Error(`Comment "${comment.id}" has an invalid author.`)
     }
     if (!isTimestamp(comment.createdAt)) {
@@ -70,28 +80,48 @@ export function createCommentIndex(comments: Comment[]): CommentIndex {
     childrenByParent.set(comment.parentId, siblings)
   }
 
+  // Depths are resolved iteratively: walk up to the nearest comment with a known depth, then
+  // assign depths back down. Recursion here would overflow on long chains listed child-first.
   const depthById = new Map<string, number>()
   const rootIdById = new Map<string, string>()
-  const resolving = new Set<string>()
-  function getDepth(id: string): number {
-    const knownDepth = depthById.get(id)
-    if (knownDepth !== undefined) return knownDepth
-    if (resolving.has(id)) throw new Error('Comments contain a circular reply.')
-    resolving.add(id)
-    const parentId = byId.get(id)!.parentId
-    const depth = parentId === null ? 0 : getDepth(parentId) + 1
-    rootIdById.set(id, parentId === null ? id : rootIdById.get(parentId)!)
-    resolving.delete(id)
-    depthById.set(id, depth)
-    return depth
+  for (const comment of comments) {
+    const path: Comment[] = []
+    let ancestor: Comment | undefined = comment
+    while (ancestor && !depthById.has(ancestor.id)) {
+      // A walk longer than the number of comments must have revisited one of them.
+      if (path.length > byId.size) throw new Error('Comments contain a circular reply.')
+      path.push(ancestor)
+      ancestor = ancestor.parentId === null ? undefined : byId.get(ancestor.parentId)
+    }
+    let depth = ancestor ? depthById.get(ancestor.id)! + 1 : 0
+    const rootId = ancestor ? rootIdById.get(ancestor.id)! : path[path.length - 1].id
+    for (let position = path.length - 1; position >= 0; position--, depth++) {
+      if (depth > maxNestingDepth) {
+        throw new Error(
+          `Comment "${path[position].id}" is nested more than ${maxNestingDepth} replies deep.`,
+        )
+      }
+      depthById.set(path[position].id, depth)
+      rootIdById.set(path[position].id, rootId)
+    }
   }
 
-  for (const comment of comments) getDepth(comment.id)
+  // Counting from the deepest comments upward lets each parent add its children's totals.
+  const descendantCountById = new Map<string, number>()
+  for (const comment of comments) descendantCountById.set(comment.id, 0)
+  const deepestFirst = [...comments].sort((a, b) => depthById.get(b.id)! - depthById.get(a.id)!)
+  for (const comment of deepestFirst) {
+    if (comment.parentId === null) continue
+    descendantCountById.set(
+      comment.parentId,
+      descendantCountById.get(comment.parentId)! + descendantCountById.get(comment.id)! + 1,
+    )
+  }
 
   roots.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
   for (const siblings of childrenByParent.values()) {
     siblings.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   }
 
-  return { roots, byId, childrenByParent, depthById, rootIdById }
+  return { roots, byId, childrenByParent, depthById, rootIdById, descendantCountById }
 }

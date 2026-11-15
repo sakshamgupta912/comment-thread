@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
@@ -215,6 +216,161 @@ for (const dark of [false, true]) {
     expect(restored.violations).toEqual([])
   })
 }
+
+const mentionSearchStates = [
+  [
+    'people',
+    (page: Page) => expect(page.getByRole('listbox', { name: 'Mention a person' })).toBeVisible(),
+  ],
+  ['empty', (page: Page) => expect(page.getByText('No people found.')).toBeVisible()],
+  [
+    'fail',
+    (page: Page) => expect(page.getByText('Could not load people. Try again.')).toBeVisible(),
+  ],
+  [
+    'hang',
+    (page: Page) =>
+      expect(page.getByRole('status').filter({ hasText: 'Loading...' })).toBeVisible(),
+  ],
+] as const
+
+for (const [mode, ready] of mentionSearchStates) {
+  test(`mention list keeps a valid ARIA structure while search is "${mode}"`, async ({ page }) => {
+    const composer = page.getByRole('combobox', { name: 'Start a new conversation...' })
+    await page.getByLabel('Mention search').selectOption(mode)
+    await composer.fill('@')
+    await ready(page)
+    // Only a list that has options is a listbox, and only then is the combobox expanded.
+    await expect(page.getByRole('listbox')).toHaveCount(mode === 'people' ? 1 : 0)
+    await expect(composer).toHaveAttribute('aria-expanded', mode === 'people' ? 'true' : 'false')
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .analyze()
+    expect(results.violations).toEqual([])
+  })
+}
+
+test('mention suggestions match names in any script and honour the limit and filter', async ({
+  page,
+}) => {
+  const composer = page.getByRole('combobox', { name: 'Start a new conversation...' })
+  await composer.fill('@José')
+  await page.getByRole('option', { name: 'José Álvarez' }).click()
+  await expect(composer.locator('[data-contact-id="jose"]')).toHaveText('José Álvarez')
+  await composer.fill('@Zoë')
+  await expect(page.getByRole('option', { name: 'Zoë Müller' })).toBeVisible()
+  await composer.fill('@Anne-Mar')
+  await expect(page.getByRole('option', { name: "Anne-Marie O'Brien" })).toBeVisible()
+
+  const suggestions = page.getByRole('listbox', { name: 'Mention a person' }).getByRole('option')
+  await page.getByLabel('Limit mentions').check()
+  await composer.fill('@')
+  await expect(suggestions).toHaveCount(1)
+  await page.getByLabel('Limit mentions').uncheck()
+  await page.getByLabel('Filter mentions').check()
+  await composer.fill('@')
+  await expect(suggestions).toHaveCount(3)
+  await expect(suggestions.filter({ hasText: 'You' })).toHaveCount(0)
+})
+
+test('renderError receives the error type, message, and original cause', async ({ page }) => {
+  await page.getByLabel('Custom errors').check()
+  await page.getByLabel('Mention search').selectOption('fail')
+  const composer = page.getByRole('combobox', { name: 'Start a new conversation...' })
+  await composer.fill('@')
+  const alert = page.getByRole('alert')
+  await expect(alert).toHaveText(
+    'Custom mention-search: Could not load people. Try again. (cause: search backend down)',
+  )
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+    .analyze()
+  expect(results.violations).toEqual([])
+
+  await composer.press('Escape')
+  await page.getByLabel('Fail callbacks').check()
+  await composer.fill('This post will be rejected')
+  await composer.press('Enter')
+  await expect(alert).toHaveAttribute('data-error-type', 'post')
+  await expect(composer).toHaveText('This post will be rejected')
+})
+
+test('a finished post keeps a reply target chosen elsewhere while it was pending', async ({
+  page,
+}) => {
+  await page.getByLabel('Hold posting').check()
+  const thread = page.getByTestId('first')
+  const first = thread.getByRole('article').filter({ hasText: 'First conversation' })
+  const second = thread.getByRole('article').filter({ hasText: 'Second conversation' })
+  const firstComposer = first.getByRole('combobox')
+  await first.getByRole('button', { name: 'Reply', exact: true }).first().click()
+  await firstComposer.fill('First reply draft')
+  await firstComposer.press('Enter')
+  await expect(page.getByLabel('Create calls')).toHaveText('1')
+
+  await second.getByRole('button', { name: 'Reply', exact: true }).first().click()
+  await expect(second.getByRole('combobox')).toHaveAttribute('aria-label', 'Reply to Other...')
+  await page.evaluate(() => window.dispatchEvent(new Event('release-create')))
+
+  await expect(firstComposer).toHaveText('')
+  await expect(second.getByText('Replying to', { exact: true })).toBeVisible()
+  await expect(second.getByRole('combobox')).toHaveAttribute('aria-label', 'Reply to Other...')
+})
+
+test('the component adds no banner or contentinfo landmarks to its host page', async ({ page }) => {
+  await page.goto('/?landmarks=1')
+  await expect(
+    page.getByTestId('first').getByRole('heading', { name: 'Comment feed' }),
+  ).toBeVisible()
+  await expect(page.getByRole('banner')).toHaveCount(1)
+  await expect(page.getByRole('contentinfo')).toHaveCount(1)
+})
+
+test('a very deep reply chain expands without crashing and keeps every reply', async ({ page }) => {
+  await page.goto('/?deep=400')
+  const thread = page.getByTestId('first')
+  await thread.getByRole('button', { name: 'View 399 replies' }).click()
+  await expect(thread.getByText('Reply 399', { exact: true })).toBeVisible()
+  await expect(thread.getByText(/^Reply \d+$/)).toHaveCount(399)
+})
+
+test('Enter that confirms an IME candidate after compositionend (Safari order) does not submit', async ({
+  page,
+}) => {
+  const composer = page.getByRole('combobox', { name: 'Start a new conversation...' })
+  await composer.fill('Composition draft')
+  // Safari reports compositionend first, so the confirming keydown has isComposing=false.
+  await composer.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+    element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'x' }))
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        keyCode: 229,
+        isComposing: false,
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+  })
+  await page.getByRole('button', { name: 'Refresh counters' }).click()
+  await expect(page.getByLabel('Create calls')).toHaveText('0')
+  await expect(composer).toHaveText('Composition draft')
+  await composer.press('Enter')
+  await expect(page.getByText('5 comment posts')).toBeVisible()
+})
+
+test('Reply and Delete buttons keep short names but are described by their comment author', async ({
+  page,
+}) => {
+  const first = page.getByRole('article').filter({ hasText: 'First conversation' })
+  const second = page.getByRole('article').filter({ hasText: 'Second conversation' })
+  const reply = second.getByRole('button', { name: 'Reply', exact: true })
+  await expect(reply).toHaveAccessibleDescription(/^Other\b/)
+  await expect(
+    first.getByRole('button', { name: 'Delete', exact: true }),
+  ).toHaveAccessibleDescription(/^You\b/)
+})
 
 test('reflows at 200 percent text zoom and does not change host styles', async ({ page }) => {
   const before = await page.locator('h1').evaluate((element) => getComputedStyle(element).fontSize)

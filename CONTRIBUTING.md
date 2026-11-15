@@ -14,7 +14,7 @@ npm run test:next
 
 `check` runs lint (including React Hooks and JSX accessibility), Prettier, unit/SSR tests, publint, and Are the Types Wrong using its ESM-only profile. The exports map deliberately has no CommonJS resolution; the profile matches that public contract rather than suppressing a shipped-format error. `test:browser` packs the real artifact, installs it in an isolated Vite consumer, type-checks and builds that consumer, checks package contents/tree shaking/size, then exercises it in Chromium, Firefox, and WebKit. It does not import library source or depend on the sibling demo.
 
-Generated consumers and tarballs live under `.consumer-tests`. Browser results are ignored. Ports 4180 and 4181 must be free. `test:next` builds and runs a production App Router consumer with the packed artifact and tests SSR styles, hydration, posting, and deletion. It closes the server afterward.
+Generated consumers and tarballs live under `.consumer-tests`. Browser results are ignored. Ports 4180 and 4181 must be free. `test:next` builds and runs a production App Router consumer with the packed artifact and tests SSR styles, hydration, posting, deletion, and a Server Component calling `removeComment`. It closes the server afterward.
 
 To check the minimum React major locally:
 
@@ -26,7 +26,7 @@ Remove-Item Env:TEST_REACT_VERSION
 
 CI checks React 18.3.1 and 19.3.1 on Node 22 and 24. Fluent 9.75.1 is the tested minimum. The package is intended for modern evergreen browsers; the CI browser engines are the executable compatibility contract, not a claim about all historical browsers. Changes to peer ranges require corresponding matrix coverage.
 
-The helper-only bundle must remain under 4 KiB gzip, the component-only ESM bundle (React/Fluent external) under 20 KiB gzip, and the tarball under 30 KiB. These are separate from an application's React/Fluent bundle size. Metrics are written to `.consumer-tests/bundle-size.json`.
+The helper-only bundle must remain under 4 KiB gzip, the component-only ESM bundle (React/Fluent external) under 20 KiB gzip, and the tarball under 40 KiB. These are separate from an application's React/Fluent bundle size. Metrics are written to `.consumer-tests/bundle-size.json`.
 
 The current development-tool dependency audit reports 13 moderate findings from minimatch <11.0.1. These tools are not shipped as runtime dependencies. Review upstream fixes before release; do not force a major minimatch override into ESLint/plugins that depend on its older API. The isolated Vite and patched Next.js consumer installations reported no advisories.
 

@@ -40,6 +40,11 @@ try {
     'The packed component was not server-rendered.',
   )
   assert.match(html, /data-make-styles-bucket/, 'SSR did not emit Griffel styles.')
+  const serverComponent = await (await fetch('http://127.0.0.1:4181/server-check')).text()
+  assert.ok(
+    serverComponent.includes('0 remaining after removeComment on the server'),
+    'A Server Component could not call removeComment from the package entry.',
+  )
   browser = await chromium.launch()
   const page = await browser.newPage()
   const errors = []
@@ -63,7 +68,7 @@ try {
   await expect(page.getByText('Posted after hydration', { exact: true })).toHaveCount(0)
   assert.deepEqual(errors, [], 'The Next.js consumer emitted hydration/runtime errors.')
   console.log(
-    'Packed Next.js App Router consumer passed SSR, styles, hydration, posting, and deletion.',
+    'Packed Next.js App Router consumer passed SSR, styles, hydration, posting, deletion, and a Server Component calling removeComment.',
   )
 } finally {
   await browser?.close()

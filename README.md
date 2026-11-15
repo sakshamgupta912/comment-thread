@@ -1,7 +1,7 @@
 # `@fluent/comment-thread`
 
 A reusable, controlled React comment thread built with Fluent UI React Components.
-<img width="1085" height="876" alt="image" src="https://github.com/user-attachments/assets/97a4c8f0-dedb-4888-b85b-ed16ea3ac63e" />
+<img width="1085" height="876" alt="The comment thread showing conversations with nested replies, mentions, and a composer" src="https://github.com/user-attachments/assets/97a4c8f0-dedb-4888-b85b-ed16ea3ac63e" />
 
 This repository contains the package only. The Vite demo lives in a separate repository. The package is licensed under MIT.
 
@@ -94,7 +94,7 @@ The component is controlled-only in v1; it does not keep a second, uncontrolled 
 
 ## Mentions
 
-Pass `contactSearch(query, signal)` to enable asynchronous @mention suggestions. Typing `@` opens the picker and calls `contactSearch` with an empty query, so return the initial suggestions for that case. Searches are debounced by 200 ms and stale responses are ignored. The component stores mentions inline as `@[Name](userId)`. In this token format, `\` and `]` in the name are backslash-escaped, and the opaque user ID is URI-encoded, including parentheses. Apply the same token grammar in your application; mention parsing helpers are intentionally internal. Comment text is rendered as text, never HTML.
+Pass `contactSearch(query, signal)` to enable asynchronous @mention suggestions. Typing `@` opens the picker and calls `contactSearch` with an empty query, so return the initial suggestions for that case. The query is the text typed after `@` up to the caret: letters and digits in any script, `_`, `-`, and apostrophes, so names such as `José`, `李雷`, and `O'Brien` work. Any other character, such as a space or a sentence-ending period, closes the picker. Searches are debounced by 200 ms and stale responses are ignored. Use `mentionLimit` to cap the number of rendered suggestions, and `filterMentionSuggestions(suggestion, query)` to apply additional consumer-defined criteria after the search callback returns. Omit `mentionLimit` to render all valid results. The component stores mentions inline as `@[Name](userId)`. In this token format, `\` and `]` in the name are backslash-escaped, and the opaque user ID is URI-encoded, including parentheses. Apply the same token grammar in your application; mention parsing helpers are intentionally internal. Comment text is rendered as text, never HTML.
 
 ## Deleting comments
 
@@ -128,32 +128,55 @@ Customize the dialog and action through `labels.delete`, `labels.deleting`, `lab
 
 ## Optional configuration
 
-`loading`, `error`, `readOnly`, `maxDepth`, `pagination`, `pageSize`, `formatDate`, `labels`, `className`, `style`, standard root `<div>` attributes, and a forwarded root ref are supported.
+`loading`, `error`, `readOnly`, `maxDepth`, `maxNestingDepth`, `headingLevel`, `pagination`, `pageSize`, `formatDate`, `labels`, `className`, `style`, standard root `<div>` attributes, and a forwarded root ref are supported.
 
-| Prop                 | Type                                                                   | Default / contract                                                                     |
-| -------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `comments`           | `Comment[]`                                                            | Required; immutable updates, complete parent chains, unique non-empty IDs.             |
-| `currentUser`        | `CommentAuthor`                                                        | Required; the identity used for composers and default delete permissions.              |
-| `onCreate`           | `(input: CreateCommentInput) => Promise<void>`                         | Required; handles both root comments and replies.                                      |
-| `onDelete`           | `(comment: Comment) => Promise<void>`                                  | Omitted; deletion is hidden until provided. Remove the entire subtree.                 |
-| `canDelete`          | `(comment: Comment, user: CommentAuthor) => boolean`                   | Author ID equals current-user ID. UI policy, not authorization.                        |
-| `contactSearch`      | `(query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>` | Omitted; enables mentions when provided.                                               |
-| `loading`            | `boolean`                                                              | `false`; replaces the feed with a loading status.                                      |
-| `error`              | `string \| null`                                                       | `null`; displays an external loading/data error.                                       |
-| `readOnly`           | `boolean`                                                              | `false`; hides create/reply/delete, but still allows expanding conversations.          |
-| `maxDepth`           | `number`                                                               | `3`; root depth is 0. Limits new reply actions, not rendering existing deeper replies. |
-| `pagination`         | `boolean \| 'show-all'`                                                | `true`; client-side root pagination only.                                              |
-| `pageSize`           | `number`                                                               | `2`; finite values are floored and clamped to at least 1.                              |
-| `formatDate`         | `(date: Date) => string`                                               | Relative time in the browser; deterministic ISO during SSR/initial hydration.          |
-| `labels`             | `Partial<CommentThreadLabels>`                                         | English defaults; override individual strings/functions.                               |
-| `className`, `style` | Standard root attributes                                               | Applied to the outer `<div>`.                                                          |
-| `ref`                | `Ref<HTMLDivElement>`                                                  | Forwarded to the outer `<div>`.                                                        |
+| Prop                       | Type                                                                   | Default / contract                                                                     |
+| -------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `comments`                 | `Comment[]`                                                            | Required; immutable updates, complete parent chains, unique non-empty IDs.             |
+| `currentUser`              | `CommentAuthor`                                                        | Required; the identity used for composers and default delete permissions.              |
+| `onCreate`                 | `(input: CreateCommentInput) => Promise<void>`                         | Required; handles both root comments and replies.                                      |
+| `onDelete`                 | `(comment: Comment) => Promise<void>`                                  | Omitted; deletion is hidden until provided. Remove the entire subtree.                 |
+| `canDelete`                | `(comment: Comment, user: CommentAuthor) => boolean`                   | Author ID equals current-user ID. UI policy, not authorization.                        |
+| `contactSearch`            | `(query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>` | Omitted; enables mentions when provided.                                               |
+| `mentionLimit`             | `number`                                                               | Omitted; maximum number of valid suggestions rendered.                                 |
+| `filterMentionSuggestions` | `(suggestion, query) => boolean`                                       | Omitted; additional consumer-defined suggestion criteria.                              |
+| `renderError`              | `(error: CommentThreadError) => ReactNode`                             | Omitted; uses the built-in Fluent UI error surfaces.                                   |
+| `loading`                  | `boolean`                                                              | `false`; replaces the feed with a loading status.                                      |
+| `error`                    | `string \| null`                                                       | `null`; displays an external loading/data error.                                       |
+| `readOnly`                 | `boolean`                                                              | `false`; hides create/reply/delete, but still allows expanding conversations.          |
+| `maxDepth`                 | `number`                                                               | `3`; root depth is 0. Limits new reply actions, not rendering existing deeper replies. |
+| `maxNestingDepth`          | `number`                                                               | Unlimited; comments nested deeper (root depth is 0) are rejected as invalid data.      |
+| `headingLevel`             | `1 \| 2 \| 3 \| 4 \| 5 \| 6`                                           | `2`; the level of the title heading, so it fits the host page's outline.               |
+| `pagination`               | `boolean \| 'show-all'`                                                | `true`; client-side root pagination only.                                              |
+| `pageSize`                 | `number`                                                               | `2`; finite values are floored and clamped to at least 1.                              |
+| `formatDate`               | `(date: Date) => string`                                               | Relative time in the browser; deterministic ISO during SSR/initial hydration.          |
+| `labels`                   | `Partial<CommentThreadLabels>`                                         | English defaults; override individual strings/functions.                               |
+| `className`, `style`       | Standard root attributes                                               | Applied to the outer `<div>`.                                                          |
+| `ref`                      | `Ref<HTMLDivElement>`                                                  | Forwarded to the outer `<div>`.                                                        |
 
 `Comment` contains `id: string`, `parentId: string | null`, `author: CommentAuthor`, `text: string`, and `createdAt: string`. `CommentAuthor` contains `id`, `name`, and optional `avatarUrl`. `MentionSuggestion` uses the same author shape. `CreateCommentInput` contains `text` and `parentId`.
+
+All component-handled failures use the optional `renderError` callback. It receives `{ type, message, cause }`, where `type` is `load`, `invalid-comments`, `post`, `delete`, or `mention-search`, and `cause` is the original thrown value when there is one (it is absent for the external `error` string). Return any React UI, such as an application-specific alert, retry action, or localized message. If omitted, the component uses its built-in Fluent UI error surfaces. The developer still owns retrying failed requests and setting the `error` prop for external data-loading failures.
+
+```tsx
+import type { CommentThreadError } from '@fluent/comment-thread'
+
+function renderError(error: CommentThreadError) {
+  return (
+    <div role="alert">
+      <strong>{error.type}</strong>: {error.message}
+    </div>
+  )
+}
+
+;<CommentThread {...props} renderError={renderError} />
+```
 
 IDs are opaque, case-sensitive strings; no values are reserved. Timestamps must use a four-digit-year ISO 8601 date-time with seconds, a `Z` or `+/-HH:MM` offset, and optional 1-9 fractional digits, for example `2026-01-03T14:00:00Z` or `2026-01-03T14:00:00.123+05:30`. Date-only, timezone-less, invalid calendar dates, and leap seconds are rejected. Precision beyond milliseconds is not retained when formatting JavaScript dates.
 
 Invalid comment trees produce a visible error instead of silently hiding data. `removeComment` throws on invalid trees or missing targets. Its exceptions are developer-facing English diagnostics; translate errors at your API boundary when appropriate.
+
+Nesting is unlimited by default, and the component never recurses once per reply level. Replies nested deeper than ten levels (or deeper than `maxDepth`, if that is larger) are listed flat, in reading order, under their ancestor at that depth instead of indenting further. That keeps the DOM shallow however deep the data is: browsers can crash on DOM trees hundreds of levels deep, and React's server renderer can silently omit deeply nested content. Set `maxNestingDepth` if you would rather reject data that deep as invalid.
 
 Pagination is client-side: it controls how many root conversations from `comments` are visible, without fetching additional data.
 
@@ -171,7 +194,7 @@ In the separate demo app, open `/?show-all=1` to try the three-conversation prev
 
 ## Localization and customization
 
-Every built-in UI string is configurable through `labels`: title/empty state, composer placeholders, reply references/actions, submission and deletion actions/errors, reply counts, pagination, loading, mention results/search errors/listbox name, and the total count. `replyTo`, `viewReplies`, `commentsCount`, `deleteConfirmation`, and `invalidComments` are functions. `invalidComments(reason)` lets you translate or replace internal validation diagnostics. `postFailed` and `deleteFailed` apply when a rejected callback provides no message. Localize non-empty callback errors yourself: the component displays those messages unchanged.
+Every built-in UI string is configurable through `labels`: title/empty state, composer placeholders, reply references/actions, submission and deletion actions/errors, reply counts, pagination, loading, mention results/search errors/listbox name, and the total count. `replyTo`, `viewReplies`, `commentsCount`, `deleteConfirmation`, and `invalidComments` are functions. `invalidComments(reason)` lets you translate or replace internal validation diagnostics. `postFailed` and `deleteFailed` apply when a rejected callback provides no message. Localize non-empty callback errors yourself: the component displays those messages unchanged. Entries that are `undefined` are ignored, so a partial translation table keeps the English default for missing keys. The default relative timestamps use the browser locale and range from seconds to years.
 
 ```tsx
 <CommentThread
@@ -231,15 +254,15 @@ Do not resolve after a failed request: reject so the component retains the draft
 
 ## Accessibility
 
-Editors are keyboard-focusable editable comboboxes with named mention listboxes, active option relationships, and disabled states. Enter submits, Shift+Enter adds a line, Arrow Up/Down selects suggestions, Enter accepts a suggestion, and Escape dismisses it. IME composition Enter does not submit. Paste inserts plain text only.
+Editors are keyboard-focusable editable comboboxes with named mention listboxes, active option relationships, and disabled states. The suggestion popup is a listbox only while it has options and the combobox is expanded only then; loading, no-result, and error messages are announced as statuses beside it. Enter submits, Shift+Enter adds a line, Arrow Up/Down selects suggestions, Enter accepts a suggestion, and Escape dismisses it. IME composition Enter does not submit, including in Safari versions that report the confirming Enter after composition has already ended. Paste inserts plain text only. The component renders no `header`, `footer`, or other landmark elements, so it never adds duplicate landmarks to the host page; use `headingLevel` to place the title in the page's heading outline.
 
-Reply selects and focuses the thread composer; cancel returns focus to that composer. Successful submissions restore composer focus unless the user has moved to another control. The delete dialog initially focuses Cancel, traps focus, and restores the trigger on cancellation. Loading/count changes use live statuses; errors use alerts. The bin icon always has a localized accessible name and hover title.
+Reply selects and focuses the thread composer; cancel returns focus to that composer. Successful submissions restore composer focus unless the user has moved to another control. The delete dialog initially focuses Cancel, traps focus, and restores the trigger on cancellation. Loading/count changes use live statuses; errors use alerts. The bin icon always has a localized accessible name and hover title. Reply and bin buttons keep those short names and are described by their comment's author and time, so a screen reader announces whose comment an action applies to.
 
 Automated axe checks cover light/dark themes and the confirmation dialog, including contrast. Reflow, keyboard, synthetic composition, and StrictMode callbacks are tested. Real screen-reader, native IME, OS contrast/text-scaling, and real-device acceptance still require maintainer testing; see CONTRIBUTING.md. Consumers must supply accessible themes, meaningful labels, localized errors, and author names, and validate accessibility inside their own page.
 
 ## SSR and Next.js App Router
 
-Imports and server rendering do not access browser globals. The build preserves `'use client'`; import the thread from a client component in App Router. The host must also configure Fluent/Griffel SSR styles, not just wrap in a `FluentProvider`.
+Imports and server rendering do not access browser globals. The component modules carry `'use client'`, so import `CommentThread` from a client component in App Router (it takes function props). The package entry itself has no directive, so helpers such as `removeComment` can also run in Server Components. The host must also configure Fluent/Griffel SSR styles, not just wrap in a `FluentProvider`.
 
 ```tsx
 'use client'

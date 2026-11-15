@@ -6,6 +6,9 @@ export interface MentionPart {
 }
 
 const mentionPattern = /@\[((?:\\.|[^\]\\])+)\]\(([^)\s]+)\)/g
+// The query being typed: letters, marks, and digits in any script, plus the hyphen and apostrophes
+// that appear in personal names. Punctuation such as a sentence-ending period closes the picker.
+const mentionQueryPattern = /(?:^|\s)@([\p{L}\p{M}\p{N}_'’-]*)$/u
 
 export function serializeMention(suggestion: MentionSuggestion): string {
   const name = suggestion.name.replaceAll('\\', '\\\\').replaceAll(']', '\\]')
@@ -45,5 +48,13 @@ export function parseMentions(text: string): MentionPart[] {
 }
 
 export function getMentionQuery(text: string): string | null {
-  return text.match(/(?:^|\s)@([\w]*)$/)?.[1] ?? null
+  return text.match(mentionQueryPattern)?.[1] ?? null
+}
+
+/** Replaces the trailing `@query` with a serialized mention followed by a space. */
+export function insertMention(text: string, suggestion: MentionSuggestion): string {
+  return text.replace(mentionQueryPattern, (match) => {
+    const prefix = match.startsWith('@') ? '' : match.slice(0, match.lastIndexOf('@'))
+    return `${prefix}${serializeMention(suggestion)} `
+  })
 }

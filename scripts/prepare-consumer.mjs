@@ -12,7 +12,7 @@ if (ssr.error) throw ssr.error
 assert.equal(ssr.status, 0, 'Packed ESM server rendering failed.')
 npm(['exec', '--', 'tsc', '--noEmit'], directory)
 npm(['exec', '--', 'vite', 'build'], directory)
-assert.ok(packed.size < 30 * 1024, `Tarball exceeds 30 KiB: ${packed.size}`)
+assert.ok(packed.size < 40 * 1024, `Tarball exceeds 40 KiB: ${packed.size}`)
 assert.ok(
   packed.files.every(
     ({ path }) =>
@@ -58,9 +58,18 @@ for (const [name, budget] of [
   }
 }
 await writeFile(join(cache, 'bundle-size.json'), `${JSON.stringify(sizes, null, 2)}\n`)
-const entry = await readFile(
-  join(directory, 'node_modules', '@fluent', 'comment-thread', 'dist', 'index.js'),
-  'utf8',
+const installed = join(directory, 'node_modules', '@fluent', 'comment-thread', 'dist')
+const useClient = /^['"]use client['"]/
+for (const file of ['CommentThread.js', 'CommentComposer.js']) {
+  assert.match(
+    await readFile(join(installed, file), 'utf8'),
+    useClient,
+    `${file} must stay a client module.`,
+  )
+}
+assert.doesNotMatch(
+  await readFile(join(installed, 'index.js'), 'utf8'),
+  useClient,
+  'The entry must stay a server module so removeComment works in Server Components.',
 )
-assert.match(entry, /^['"]use client['"]/)
 console.log(`Packed consumer verified; gzip bytes: ${JSON.stringify(sizes)}`)

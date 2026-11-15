@@ -31,11 +31,12 @@ The consuming application owns authentication, authorization, data visibility, p
 - [x] Root HTML attributes, className/style, and forwarded ref.
 - [x] Root-only styling and provider tokens are the intentional customization contract; no unstable internal CSS selectors, slots, or render props are promised.
 - [x] All component-owned UI strings are configurable; supplied API errors remain the consumer's localization responsibility.
-- [x] Invalid trees fail explicitly; internal helpers remain inaccessible through package subpaths.
+- [x] Invalid trees fail explicitly; an optional `maxNestingDepth` (unlimited by default) rejects over-deep data, and indexing and rendering never recurse once per reply level. Internal helpers remain inaccessible through package subpaths.
 
 ## 3. Consumer integrations
 
-- [x] Optional debounced asynchronous mention search with cancellation, stale-response protection, loading, no-results, and failure states.
+- [x] Optional debounced asynchronous mention search with cancellation, stale-response protection, loading, no-results, and failure states; queries accept names in any script, and `mentionLimit` and `filterMentionSuggestions` refine the results.
+- [x] `renderError` replaces every component-handled error surface and receives the type, message, and original cause.
 - [x] Escaped inline mention-token grammar documented; user IDs remain opaque; user content is never interpreted as HTML.
 - [x] No dependency on a fetching library.
 - [x] Server-confirmed and optimistic update responsibilities documented.
@@ -50,11 +51,14 @@ The consuming application owns authentication, authorization, data visibility, p
 - [x] Import/server-render safety without browser globals.
 - [x] Deterministic default timestamps during SSR/hydration; browser-relative formatting afterward.
 - [x] Multiple component instances have distinct editor/listbox/reply relationships.
-- [x] Keyboard replies, mention navigation, Escape/cancel, dialog focus trapping, and accessible icon labels.
+- [x] Keyboard replies, mention navigation, Escape/cancel, dialog focus trapping, and accessible icon labels; Reply and bin buttons are described by their comment's author and time.
+- [x] `headingLevel` places the title in the host page's heading outline, and very deep replies are listed flat so the DOM stays shallow.
 - [x] Successful submission restores composer focus unless the user moved elsewhere.
 - [x] Fluent-native restore-focus targets handle dialog cancellation; deletion restores a surviving composer/title.
-- [x] Plain-text paste, multiline submission, synthetic IME composition, and StrictMode callback assertions.
+- [x] Plain-text paste, multiline submission, synthetic IME composition (including Safari's event order, where the confirming Enter follows `compositionend`), and StrictMode callback assertions.
 - [x] Automated WCAG A/AA axe checks include light/dark themes, open dialog, and post-cancel state; no rules are disabled or dependency nodes excluded.
+- [x] The mention suggestion list is axe-scanned while populated, loading, empty, and failed; only a list with options is a listbox.
+- [x] The component renders no `header`/`footer` landmark elements, so it adds no duplicate landmarks to a host page without a `main` region.
 - [x] Narrow-container layout, 200% zoom/reflow, and a host-style isolation check.
 - [ ] Native IME acceptance using a real input method.
 - [ ] NVDA and VoiceOver, real mobile devices, 400% browser zoom, OS text scaling, and forced-colors acceptance.
@@ -64,22 +68,22 @@ The consuming application owns authentication, authorization, data visibility, p
 
 - [x] MIT license, repository metadata, and version declared.
 - [x] Intentional unbundled TypeScript ESM build; no unnecessary bundler or duplicated React/Fluent runtime.
-- [x] Import-only exports with nested types-first resolution, declarations, main/module/types metadata, and preserved `use client`.
+- [x] Import-only exports with nested types-first resolution, declarations, main/module/types metadata, and `use client` preserved on the component modules while the package entry stays server-safe.
 - [x] ESM is the only supported module format; CommonJS is not advertised.
 - [x] Explicit artifact allowlist includes dist, README, changelog, contributor/release documentation, license, and manifest.
 - [x] Side-effect-free helper import independently verified to exclude the React UI.
 - [x] React/React DOM and Fluent are peers; tooling remains in devDependencies.
 - [x] Clean Vite consumers use actual content-addressed tarballs, never source aliases or npm link.
 - [x] Packed ESM import, server render, public-type check, and production Vite build.
-- [x] Packed production Next.js 16.4.3 App Router consumer: SSR, Griffel styles, hydration, posting, deletion.
-- [x] Executable gzip budgets: helper 4 KiB, component with peers external 20 KiB; package tarball budget 30 KiB.
+- [x] Packed production Next.js 16.4.3 App Router consumer: SSR, Griffel styles, hydration, posting, deletion, and a Server Component calling `removeComment`.
+- [x] Executable gzip budgets: helper 4 KiB, component with peers external 20 KiB; package tarball budget 40 KiB.
 - [ ] Confirm legal/npm ownership and package-name availability. `@fluent/comment-thread` is provisional; GitHub repository ownership does not confer ownership of the npm scope.
 
 ## 6. Automated quality gates
 
-- [x] Unit/SSR tests for indexing, invalid trees, timestamps, mention escaping, deletion, permissions, localization, and browser-global-free rendering.
+- [x] Unit/SSR tests for indexing, invalid and over-deep trees, timestamps, mention escaping and queries, deletion, permissions, localization (including undefined labels), error causes, relative times, and browser-global-free rendering.
 - [x] Browser regression tests for runtime page-size reductions and expanded show-all to batches.
-- [x] Controlled callbacks, pending states, failures, draft independence, focus, multi-instance IDs, paste, composition, and StrictMode.
+- [x] Controlled callbacks, pending states (including a reply target chosen while a post is pending), failures, draft independence, focus, multi-instance IDs, paste, composition, and StrictMode.
 - [x] Chromium, Firefox, and WebKit projects use an isolated packed consumer.
 - [x] React Hooks and JSX accessibility ESLint rules plus Prettier configuration.
 - [x] publint and Are the Types Wrong for the declared ESM-only resolution profile.
@@ -112,21 +116,22 @@ The consuming application owns authentication, authorization, data visibility, p
 
 ## Validation evidence
 
-Locally verified on Windows with Node 26.13.0 and Fluent 9.75.1:
+Locally verified on Windows with Node 26.13.0 and Fluent 9.75.1. The rows below were re-run on 2026-11-15 after the review fixes described in the changelog, except where noted:
 
-| Gate                               | Result                                                                  |
-| ---------------------------------- | ----------------------------------------------------------------------- |
-| Library unit/SSR tests             | 8 passed                                                                |
-| Packed React 19.3.1 consumer       | 30 passed across Chromium, Firefox, and WebKit                          |
-| Packed React 18.3.1 consumer       | 30 passed across Chromium, Firefox, and WebKit                          |
-| Light/dark axe scans               | Passed before, during, and after the delete dialog in all three engines |
-| Next.js 16.4.3 production consumer | SSR, styles, hydration, posting, and deletion passed                    |
-| Demo regression suite              | 5 unit tests and 21 browser tests passed; build and lint passed         |
-| Library quality gates              | ESLint, Prettier, publint, ESM-only ATTW, and build passed              |
-| Manifest/lockfile metadata         | Name, version, dependencies, peers, and engines agree                   |
-| Helper/component gzip size         | 1,033 / 8,883 bytes; both below budget                                  |
-| Tarball dry run                    | 17 intended files, approximately 22.3 kB compressed; below 30 KiB       |
-| Publication dry run                | Passed; no real publication or authenticated registry check             |
+| Gate                               | Result                                                                                           |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Library unit/SSR tests             | 24 passed                                                                                        |
+| Packed React 19.3.1 consumer       | 63 passed across Chromium, Firefox, and WebKit                                                   |
+| Packed React 18.3.1 consumer       | 63 passed across Chromium, Firefox, and WebKit                                                   |
+| Light/dark axe scans               | Passed before, during, and after the delete dialog in all three engines                          |
+| Mention-list axe scans             | Passed while populated, loading, empty, and failed in all three engines                          |
+| Next.js 16.4.3 production consumer | SSR, styles, hydration, posting, deletion, and a Server Component calling `removeComment` passed |
+| Demo regression suite              | 4 unit tests and 22 browser tests passed; build and lint passed                                  |
+| Library quality gates              | ESLint (now including `.js`/`.mjs`), Prettier, publint, ESM-only ATTW, and build passed          |
+| Manifest/lockfile metadata         | Unchanged since the 2026-11-04 audit: name, version, dependencies, peers, and engines agree      |
+| Helper/component gzip size         | 1,183 / 9,834 bytes; both below budget                                                           |
+| Tarball dry run                    | 19 intended files, approximately 27.0 kB compressed; below 40 KiB                                |
+| Publication dry run                | Passed on 2026-11-04, not repeated after the review fixes; no real publication or registry check |
 
 Use the executable gates instead of treating this document as a substitute for tests:
 

@@ -22,7 +22,12 @@ export default defineConfig([
     },
   },
   {
-    files: ['scripts/**/*.mjs', 'tests/**/*.mjs', '*.ts'],
+    files: ['**/*.{js,mjs}'],
+    extends: [js.configs.recommended],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
+    files: ['*.ts'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
