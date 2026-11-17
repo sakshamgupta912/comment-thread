@@ -6,6 +6,34 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/')
 })
 
+test('emoticons become emoji while typing and Backspace restores them', async ({ page }) => {
+  const composer = page
+    .getByTestId('first')
+    .getByRole('combobox', { name: 'Start a new conversation...' })
+  await composer.click()
+  await composer.pressSequentially('I <3 http://x ')
+  await expect(composer).toHaveText('I ❤️ http://x ')
+  await composer.fill('')
+  await composer.pressSequentially('<3 ')
+  await expect(composer).toHaveText('❤️ ')
+  await composer.press('Backspace')
+  await expect(composer).toHaveText('<3 ')
+})
+test('richText renders posted Markdown and Ctrl+B wraps the selection', async ({ page }) => {
+  const thread = page.getByTestId('first')
+  const composer = thread.getByRole('combobox', { name: 'Start a new conversation...' })
+  await composer.click()
+  await composer.pressSequentially('word')
+  await composer.press('Shift+Home')
+  await composer.press('ControlOrMeta+b')
+  await expect(composer).toHaveText('**word**')
+  await composer.press('ControlOrMeta+b')
+  await expect(composer).toHaveText('word')
+  await composer.press('ControlOrMeta+b')
+  await thread.getByRole('button', { name: 'Post', exact: true }).click()
+  await expect(thread.locator('strong', { hasText: 'word' })).toBeVisible()
+})
+
 test('changing page size and pagination modes resets the preview without losing drafts', async ({
   page,
 }) => {

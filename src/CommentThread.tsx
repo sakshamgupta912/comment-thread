@@ -12,6 +12,7 @@ import {
   DialogContent,
   DialogSurface,
   DialogTitle,
+  Link,
   makeStyles,
   MessageBar,
   MessageBarBody,
@@ -24,6 +25,8 @@ import {
 import { CommentComposer } from './CommentComposer.js'
 import { parseMentions } from './mentions.js'
 import { formatRelativeTime } from './relative-time.js'
+import { parseInlineMarkdown } from './rich-text.js'
+import type { InlineNode } from './rich-text.js'
 import { createCommentIndex } from './thread-data.js'
 import type {
   Comment,
@@ -261,6 +264,13 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalL,
     textAlign: 'center',
   },
+  code: {
+    padding: '0 4px',
+    borderRadius: tokens.borderRadiusSmall,
+    backgroundColor: tokens.colorNeutralBackground3,
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: '0.9em',
+  },
   mention: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -286,11 +296,40 @@ const useStyles = makeStyles({
   },
 })
 
-function CommentText({ text }: { text: string }) {
+function renderInline(nodes: InlineNode[], codeClass: string): ReactNode {
+  return nodes.map((node, index) => {
+    switch (node.type) {
+      case 'text':
+        return node.text
+      case 'code':
+        return (
+          <code className={codeClass} key={index}>
+            {node.text}
+          </code>
+        )
+      case 'bold':
+        return <strong key={index}>{renderInline(node.children, codeClass)}</strong>
+      case 'italic':
+        return <em key={index}>{renderInline(node.children, codeClass)}</em>
+      case 'link':
+        return (
+          <Link href={node.href} target="_blank" rel="noopener noreferrer" inline key={index}>
+            {renderInline(node.children, codeClass)}
+          </Link>
+        )
+    }
+  })
+}
+
+function CommentText({ text, richText }: { text: string; richText: boolean }) {
   const styles = useStyles()
   return parseMentions(text).map((part, index) =>
     part.contactId === undefined ? (
-      part.text
+      richText ? (
+        <span key={index}>{renderInline(parseInlineMarkdown(part.text), styles.code)}</span>
+      ) : (
+        part.text
+      )
     ) : (
       <span className={styles.mention} key={`${part.contactId}-${index}`}>
         <Avatar size={20} name={part.text} />
@@ -350,6 +389,8 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
     mentionLimit,
     filterMentionSuggestions,
     renderError,
+    emoticons = false,
+    richText = false,
     loading = false,
     error = null,
     readOnly = false,
@@ -662,7 +703,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
             )}
           </div>
           <div className={styles.body}>
-            <CommentText text={comment.text} />
+            <CommentText text={comment.text} richText={richText} />
           </div>
           <div className={styles.actions}>
             {!readOnly && depth < depthLimit && (
@@ -864,6 +905,8 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                           mentionLimit={mentionLimit}
                           filterMentionSuggestions={filterMentionSuggestions}
                           renderError={renderError}
+                          emoticons={emoticons}
+                          richText={richText}
                           disabled={loading || isSubmitting || deleting || Boolean(globalError)}
                           sendButton
                           focusOnReply={isReplying}
@@ -944,6 +987,8 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                     mentionLimit={mentionLimit}
                     filterMentionSuggestions={filterMentionSuggestions}
                     renderError={renderError}
+                    emoticons={emoticons}
+                    richText={richText}
                     disabled={
                       loading || Boolean(submitting.main) || deleting || Boolean(globalError)
                     }

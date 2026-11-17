@@ -79,6 +79,17 @@ export interface CommentThreadProps extends Omit<HTMLAttributes<HTMLDivElement>,
   filterMentionSuggestions?: (suggestion: MentionSuggestion, query: string) => boolean
   /** Replaces the default error surface for any component-handled exception. */
   renderError?: (error: CommentThreadError) => ReactNode
+  /**
+   * Replaces typed emoticons such as `<3` with emoji once the user types a space or punctuation.
+   * Off by default; pass true for the built-in emoticons or a map of emoticon to emoji to customize.
+   */
+  emoticons?: boolean | Record<string, string>
+  /**
+   * Renders a Markdown subset in comments (`**bold**`, `*italic*`, `` `code` ``, `[label](https://url)`)
+   * and enables Ctrl/Cmd+B, I, and E in the composer. Text stays plain strings. Off by default so
+   * existing comments that contain asterisks or backticks keep rendering as written.
+   */
+  richText?: boolean
   loading?: boolean
   error?: string | null
   readOnly?: boolean

@@ -41,7 +41,7 @@ The consuming application owns authentication, authorization, data visibility, p
 - [x] No dependency on a fetching library.
 - [x] Server-confirmed and optimistic update responsibilities documented.
 - [x] API creation/deletion/search examples, including explicit failed-response handling.
-- [x] Demo wires persisted deletion, icon-only bins, and an admin-mode override without pretending to provide authentication.
+- [x] Playground wires persisted comments, deletion policies (own, everyone, disabled), mentions, localization, simulated failures, and every documented layout prop without pretending to provide authentication.
 - [x] Authorization, subtree-deletion policy, and comment-content visibility remain consumer/server responsibilities.
 
 ## 4. UI, accessibility, SSR
@@ -126,7 +126,7 @@ Locally verified on Windows with Node 26.13.0 and Fluent 9.75.1. The rows below 
 | Light/dark axe scans               | Passed before, during, and after the delete dialog in all three engines                          |
 | Mention-list axe scans             | Passed while populated, loading, empty, and failed in all three engines                          |
 | Next.js 16.4.3 production consumer | SSR, styles, hydration, posting, deletion, and a Server Component calling `removeComment` passed |
-| Demo regression suite              | 4 unit tests and 22 browser tests passed; build and lint passed                                  |
+| Playground regression suite        | 16 unit tests and 20 browser tests passed; build and lint passed                                 |
 | Library quality gates              | ESLint (now including `.js`/`.mjs`), Prettier, publint, ESM-only ATTW, and build passed          |
 | Manifest/lockfile metadata         | Unchanged since the 2026-11-04 audit: name, version, dependencies, peers, and engines agree      |
 | Helper/component gzip size         | 1,183 / 9,834 bytes; both below budget                                                           |

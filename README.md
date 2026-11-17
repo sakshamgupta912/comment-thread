@@ -3,7 +3,7 @@
 A reusable, controlled React comment thread built with Fluent UI React Components.
 <img width="1085" height="876" alt="The comment thread showing conversations with nested replies, mentions, and a composer" src="https://github.com/user-attachments/assets/97a4c8f0-dedb-4888-b85b-ed16ea3ac63e" />
 
-This repository contains the package only. The Vite demo lives in a separate repository. The package is licensed under MIT.
+This repository contains the package only. The Fluent UI playground lives in a separate repository. The package is licensed under MIT.
 
 ## Install from GitHub
 
@@ -96,6 +96,12 @@ The component is controlled-only in v1; it does not keep a second, uncontrolled 
 
 Pass `contactSearch(query, signal)` to enable asynchronous @mention suggestions. Typing `@` opens the picker and calls `contactSearch` with an empty query, so return the initial suggestions for that case. The query is the text typed after `@` up to the caret: letters and digits in any script, `_`, `-`, and apostrophes, so names such as `José`, `李雷`, and `O'Brien` work. Any other character, such as a space or a sentence-ending period, closes the picker. Searches are debounced by 200 ms and stale responses are ignored. Use `mentionLimit` to cap the number of rendered suggestions, and `filterMentionSuggestions(suggestion, query)` to apply additional consumer-defined criteria after the search callback returns. Omit `mentionLimit` to render all valid results. The component stores mentions inline as `@[Name](userId)`. In this token format, `\` and `]` in the name are backslash-escaped, and the opaque user ID is URI-encoded, including parentheses. Apply the same token grammar in your application; mention parsing helpers are intentionally internal. Comment text is rendered as text, never HTML.
 
+## Emoticons and basic formatting
+
+Set `emoticons` to turn it on (it is off by default). Pass `true` for the built-in map, or a map such as `{ ':)': '😀' }` to replace the defaults. Typed emoticons such as `<3`, `:)`, and `;)` become emoji when followed by a space or `. , ! ?`. Only standalone emoticons are replaced, so `http://` and `a:)b` are untouched. Backspace or Ctrl/Cmd+Z immediately afterwards restores what was typed.
+
+Set `richText` to render a Markdown subset: `**bold**`, `*italic*`, `` `code` ``, and `[label](https://url)` (only `http`, `https`, and `mailto` links). It also enables Ctrl/Cmd+B, I, and E in the composer to wrap the selection in bold, italic, or code markers. Comments remain plain strings and are never rendered as HTML, so `richText` is safe to enable and off by default only so existing comments render as written. Mentions still work alongside formatting, but a formatting span cannot contain a mention.
+
 ## Deleting comments
 
 Pass `onDelete(comment): Promise<void>` to enable the icon-only bin action in the top-right of each eligible comment's header. Its accessible name and hover title use `labels.delete`; the confirmation dialog retains an explicit Delete button. Without this callback, no delete actions appear. By default, users can delete only their own comments. Override `canDelete(comment, currentUser)` for application-specific rules, such as moderator permissions. Read-only mode always hides deletion actions.
@@ -130,29 +136,31 @@ Customize the dialog and action through `labels.delete`, `labels.deleting`, `lab
 
 `loading`, `error`, `readOnly`, `maxDepth`, `maxNestingDepth`, `headingLevel`, `pagination`, `pageSize`, `formatDate`, `labels`, `className`, `style`, standard root `<div>` attributes, and a forwarded root ref are supported.
 
-| Prop                       | Type                                                                   | Default / contract                                                                     |
-| -------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `comments`                 | `Comment[]`                                                            | Required; immutable updates, complete parent chains, unique non-empty IDs.             |
-| `currentUser`              | `CommentAuthor`                                                        | Required; the identity used for composers and default delete permissions.              |
-| `onCreate`                 | `(input: CreateCommentInput) => Promise<void>`                         | Required; handles both root comments and replies.                                      |
-| `onDelete`                 | `(comment: Comment) => Promise<void>`                                  | Omitted; deletion is hidden until provided. Remove the entire subtree.                 |
-| `canDelete`                | `(comment: Comment, user: CommentAuthor) => boolean`                   | Author ID equals current-user ID. UI policy, not authorization.                        |
-| `contactSearch`            | `(query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>` | Omitted; enables mentions when provided.                                               |
-| `mentionLimit`             | `number`                                                               | Omitted; maximum number of valid suggestions rendered.                                 |
-| `filterMentionSuggestions` | `(suggestion, query) => boolean`                                       | Omitted; additional consumer-defined suggestion criteria.                              |
-| `renderError`              | `(error: CommentThreadError) => ReactNode`                             | Omitted; uses the built-in Fluent UI error surfaces.                                   |
-| `loading`                  | `boolean`                                                              | `false`; replaces the feed with a loading status.                                      |
-| `error`                    | `string \| null`                                                       | `null`; displays an external loading/data error.                                       |
-| `readOnly`                 | `boolean`                                                              | `false`; hides create/reply/delete, but still allows expanding conversations.          |
-| `maxDepth`                 | `number`                                                               | `3`; root depth is 0. Limits new reply actions, not rendering existing deeper replies. |
-| `maxNestingDepth`          | `number`                                                               | Unlimited; comments nested deeper (root depth is 0) are rejected as invalid data.      |
-| `headingLevel`             | `1 \| 2 \| 3 \| 4 \| 5 \| 6`                                           | `2`; the level of the title heading, so it fits the host page's outline.               |
-| `pagination`               | `boolean \| 'show-all'`                                                | `true`; client-side root pagination only.                                              |
-| `pageSize`                 | `number`                                                               | `2`; finite values are floored and clamped to at least 1.                              |
-| `formatDate`               | `(date: Date) => string`                                               | Relative time in the browser; deterministic ISO during SSR/initial hydration.          |
-| `labels`                   | `Partial<CommentThreadLabels>`                                         | English defaults; override individual strings/functions.                               |
-| `className`, `style`       | Standard root attributes                                               | Applied to the outer `<div>`.                                                          |
-| `ref`                      | `Ref<HTMLDivElement>`                                                  | Forwarded to the outer `<div>`.                                                        |
+| Prop                       | Type                                                                   | Default / contract                                                                        |
+| -------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `comments`                 | `Comment[]`                                                            | Required; immutable updates, complete parent chains, unique non-empty IDs.                |
+| `currentUser`              | `CommentAuthor`                                                        | Required; the identity used for composers and default delete permissions.                 |
+| `onCreate`                 | `(input: CreateCommentInput) => Promise<void>`                         | Required; handles both root comments and replies.                                         |
+| `onDelete`                 | `(comment: Comment) => Promise<void>`                                  | Omitted; deletion is hidden until provided. Remove the entire subtree.                    |
+| `canDelete`                | `(comment: Comment, user: CommentAuthor) => boolean`                   | Author ID equals current-user ID. UI policy, not authorization.                           |
+| `contactSearch`            | `(query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>` | Omitted; enables mentions when provided.                                                  |
+| `mentionLimit`             | `number`                                                               | Omitted; maximum number of valid suggestions rendered.                                    |
+| `filterMentionSuggestions` | `(suggestion, query) => boolean`                                       | Omitted; additional consumer-defined suggestion criteria.                                 |
+| `renderError`              | `(error: CommentThreadError) => ReactNode`                             | Omitted; uses the built-in Fluent UI error surfaces.                                      |
+| `emoticons`                | `boolean \| Record<string, string>`                                    | `false`; set to replace typed emoticons (`<3`, `:)`) with emoji. Pass a map to customize. |
+| `richText`                 | `boolean`                                                              | `false`; renders `**bold**`, `*italic*`, `` `code` ``, `[label](https://url)`.            |
+| `loading`                  | `boolean`                                                              | `false`; replaces the feed with a loading status.                                         |
+| `error`                    | `string \| null`                                                       | `null`; displays an external loading/data error.                                          |
+| `readOnly`                 | `boolean`                                                              | `false`; hides create/reply/delete, but still allows expanding conversations.             |
+| `maxDepth`                 | `number`                                                               | `3`; root depth is 0. Limits new reply actions, not rendering existing deeper replies.    |
+| `maxNestingDepth`          | `number`                                                               | Unlimited; comments nested deeper (root depth is 0) are rejected as invalid data.         |
+| `headingLevel`             | `1 \| 2 \| 3 \| 4 \| 5 \| 6`                                           | `2`; the level of the title heading, so it fits the host page's outline.                  |
+| `pagination`               | `boolean \| 'show-all'`                                                | `true`; client-side root pagination only.                                                 |
+| `pageSize`                 | `number`                                                               | `2`; finite values are floored and clamped to at least 1.                                 |
+| `formatDate`               | `(date: Date) => string`                                               | Relative time in the browser; deterministic ISO during SSR/initial hydration.             |
+| `labels`                   | `Partial<CommentThreadLabels>`                                         | English defaults; override individual strings/functions.                                  |
+| `className`, `style`       | Standard root attributes                                               | Applied to the outer `<div>`.                                                             |
+| `ref`                      | `Ref<HTMLDivElement>`                                                  | Forwarded to the outer `<div>`.                                                           |
 
 `Comment` contains `id: string`, `parentId: string | null`, `author: CommentAuthor`, `text: string`, and `createdAt: string`. `CommentAuthor` contains `id`, `name`, and optional `avatarUrl`. `MentionSuggestion` uses the same author shape. `CreateCommentInput` contains `text` and `parentId`.
 
@@ -190,7 +198,7 @@ For example, use `pagination="show-all" pageSize={3}` to preview the first three
 
 Changing `pageSize` or `pagination` resets the visible root preview to the new page size. Drafts and expanded replies survive. Adding comments while a show-all view is expanded keeps that view expanded.
 
-In the separate demo app, open `/?show-all=1` to try the three-conversation preview mode.
+In the separate playground app, choose "Show all from preview" under Layout and pagination to try the preview mode.
 
 ## Localization and customization
 

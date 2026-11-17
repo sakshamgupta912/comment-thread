@@ -119,6 +119,8 @@ function App() {
       mentionLimit={limitMentions ? 1 : undefined}
       filterMentionSuggestions={filterMentions ? excludeCurrentUser : undefined}
       renderError={customErrors ? renderCustomError : undefined}
+      richText
+      emoticons
       onCreate={async (input) => {
         setCreates((count) => count + 1)
         if (holdCreate) {

@@ -4,6 +4,8 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Avatar, Button, makeStyles, Spinner, tokens } from '@fluentui/react-components'
 import { getMentionQuery, insertMention, parseMentions, serializeMention } from './mentions.js'
+import { defaultEmoticons, findEmoticon } from './emoticons.js'
+import type { EmoticonMap } from './emoticons.js'
 import type { CommentThreadError, CommentThreadLabels, MentionSuggestion } from './types.js'
 
 const useStyles = makeStyles({
@@ -109,10 +111,14 @@ interface CommentComposerProps {
   mentionLimit?: number
   filterMentionSuggestions?: (suggestion: MentionSuggestion, query: string) => boolean
   renderError?: (error: CommentThreadError) => ReactNode
+  emoticons?: boolean | EmoticonMap
+  richText?: boolean
   disabled?: boolean
   sendButton?: boolean
   focusOnReply?: boolean
 }
+
+const formatShortcuts: Record<string, string> = { b: '**', i: '*', e: '`' }
 
 function readEditor(element: Node): string {
   if (element.nodeType === Node.TEXT_NODE) return element.textContent ?? ''
@@ -142,12 +148,22 @@ export function CommentComposer({
   mentionLimit,
   filterMentionSuggestions,
   renderError,
+  emoticons = false,
+  richText = false,
   disabled = false,
   sendButton = false,
   focusOnReply = false,
 }: CommentComposerProps) {
   const styles = useStyles()
   const editor = useRef<HTMLDivElement>(null)
+  const lastEmoticon = useRef<{
+    node: Text
+    start: number
+    emoticon: string
+    emoji: string
+  } | null>(null)
+  const emoticonMap =
+    emoticons === false ? undefined : emoticons === true ? defaultEmoticons : emoticons
   const listId = useId()
   const [focused, setFocused] = useState(false)
   const [dismissedQuery, setDismissedQuery] = useState<string | null>(null)
@@ -235,6 +251,71 @@ export function CommentComposer({
       selection?.addRange(range)
     }
   }, [styles.mention, value])
+
+  function replaceEmoticon() {
+    lastEmoticon.current = null
+    const selection = window.getSelection()
+    const node = selection?.anchorNode
+    if (!emoticonMap || !selection?.isCollapsed || node?.nodeType !== Node.TEXT_NODE) return
+    if (node.parentElement !== editor.current) return
+
+    const text = node as Text
+    const caret = selection.anchorOffset
+    const match = findEmoticon(text.data.slice(0, caret), emoticonMap)
+    if (!match) return
+    text.replaceData(match.start, match.emoticon.length, match.emoji)
+    selection.collapse(text, caret - match.emoticon.length + match.emoji.length)
+    lastEmoticon.current = { node: text, ...match }
+  }
+
+  // Backspace or Ctrl/Cmd+Z right after a replacement restores the typed emoticon. Native undo
+  // cannot do this because the replacement was a programmatic edit.
+  function revertEmoticon(): boolean {
+    const last = lastEmoticon.current
+    const selection = window.getSelection()
+    if (!last || !selection?.isCollapsed || selection.anchorNode !== last.node) return false
+    const end = last.start + last.emoji.length + 1
+    if (
+      selection.anchorOffset !== end ||
+      last.node.data.slice(last.start, end - 1) !== last.emoji
+    ) {
+      return false
+    }
+    last.node.replaceData(last.start, last.emoji.length, last.emoticon)
+    selection.collapse(last.node, last.start + last.emoticon.length + 1)
+    lastEmoticon.current = null
+    return true
+  }
+
+  // Wraps the selection (or inserts an empty pair at the caret) in Markdown markers, or removes
+  // them when the selection is already wrapped. Selections that cross a mention are left alone.
+  function toggleMarker(marker: string) {
+    const selection = window.getSelection()
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null
+    const node = range?.startContainer
+    if (!selection || !range || node !== range.endContainer) return
+    if (node.nodeType !== Node.TEXT_NODE || node.parentElement !== editor.current) return
+
+    const text = node as Text
+    const { startOffset: start, endOffset: end } = range
+    const before = text.data.slice(0, start)
+    const selected = text.data.slice(start, end)
+    const after = text.data.slice(end)
+    const size = marker.length
+    const wrapped =
+      before.endsWith(marker) &&
+      after.startsWith(marker) &&
+      !(marker === '*' && before.endsWith('**') && after.startsWith('**'))
+
+    if (wrapped) {
+      text.data = before.slice(0, -size) + selected + after.slice(size)
+      selection.setBaseAndExtent(text, start - size, text, end - size)
+    } else {
+      text.data = before + marker + selected + marker + after
+      selection.setBaseAndExtent(text, start + size, text, end + size)
+    }
+    onChange(readEditor(editor.current!))
+  }
 
   function chooseSuggestion(index: number) {
     const suggestion = suggestions[index]
@@ -326,6 +407,9 @@ export function CommentComposer({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onInput={(event) => {
+          const native = event.nativeEvent as InputEvent
+          if (native.inputType === 'insertText' && !native.isComposing) replaceEmoticon()
+          else lastEmoticon.current = null
           onChange(readEditor(event.currentTarget))
           setSelected(0)
           setDismissedQuery(null)
@@ -356,6 +440,24 @@ export function CommentComposer({
           // Safari fires compositionend before the keydown that confirms an IME candidate, so
           // isComposing is already false there; keyCode 229 still marks it as IME input.
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
+          const modifier = event.ctrlKey || event.metaKey
+          if (
+            (event.key === 'Backspace' ||
+              (modifier && !event.shiftKey && event.key.toLowerCase() === 'z')) &&
+            revertEmoticon()
+          ) {
+            event.preventDefault()
+            onChange(readEditor(event.currentTarget))
+            return
+          }
+          if (richText && modifier && !event.altKey && !event.shiftKey) {
+            const marker = formatShortcuts[event.key.toLowerCase()]
+            if (marker) {
+              event.preventDefault()
+              toggleMarker(marker)
+              return
+            }
+          }
           if (
             listOpen &&
             suggestions.length &&
