@@ -18,7 +18,7 @@ export interface Comment {
 export type MentionSuggestion = CommentAuthor
 
 export type CommentThreadErrorType =
-  'load' | 'invalid-comments' | 'post' | 'delete' | 'mention-search'
+  'load' | 'invalid-comments' | 'post' | 'edit' | 'delete' | 'mention-search'
 
 export interface CommentThreadError {
   type: CommentThreadErrorType
@@ -40,6 +40,12 @@ export interface CommentThreadLabels {
   replyingTo: string
   cancelReply: string
   reply: string
+  edit: string
+  editPlaceholder: string
+  save: string
+  saving: string
+  cancelEdit: string
+  editFailed: string
   delete: string
   deleting: string
   cancelDelete: string
@@ -67,6 +73,10 @@ export interface CommentThreadProps extends Omit<HTMLAttributes<HTMLDivElement>,
   comments: Comment[]
   currentUser: CommentAuthor
   onCreate: (input: CreateCommentInput) => Promise<void>
+  /** Save the new text of the comment, then update comments before resolving. */
+  onEdit?: (comment: Comment, text: string) => Promise<void>
+  /** Controls action visibility, not server authorization. Defaults to author-only. */
+  canEdit?: (comment: Comment, currentUser: CommentAuthor) => boolean
   /** Delete the comment and its descendants, then update comments before resolving. */
   onDelete?: (comment: Comment) => Promise<void>
   /** Controls action visibility, not server authorization. Defaults to author-only. */
@@ -84,12 +94,6 @@ export interface CommentThreadProps extends Omit<HTMLAttributes<HTMLDivElement>,
    * Off by default; pass true for the built-in emoticons or a map of emoticon to emoji to customize.
    */
   emoticons?: boolean | Record<string, string>
-  /**
-   * Renders a Markdown subset in comments (`**bold**`, `*italic*`, `` `code` ``, `[label](https://url)`)
-   * and enables Ctrl/Cmd+B, I, and E in the composer. Text stays plain strings. Off by default so
-   * existing comments that contain asterisks or backticks keep rendering as written.
-   */
-  richText?: boolean
   loading?: boolean
   error?: string | null
   readOnly?: boolean

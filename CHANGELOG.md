@@ -7,6 +7,7 @@ Initial reusable, controlled Fluent UI comment-thread package.
 - Typed comment creation, threaded replies, depth limits, and client-side pagination.
 - Async mention lookup with cancellation, escaped inline tokens, and plain-text rendering.
 - Icon-only deletion with confirmation, consumer-defined permissions, async error handling, and immutable subtree removal.
+- Opt-in inline editing (`onEdit`, `canEdit`, edit labels, `edit` error type) with an immutable `updateComment` helper.
 - Theme-aware layout, configurable labels, root attributes/styles, and forwarded refs.
 - Reset pagination when the page size or pagination mode changes.
 - Require timezone-qualified ISO timestamps and reject invalid calendar dates.

@@ -12,7 +12,6 @@ import {
   DialogContent,
   DialogSurface,
   DialogTitle,
-  Link,
   makeStyles,
   MessageBar,
   MessageBarBody,
@@ -25,8 +24,6 @@ import {
 import { CommentComposer } from './CommentComposer.js'
 import { parseMentions } from './mentions.js'
 import { formatRelativeTime } from './relative-time.js'
-import { parseInlineMarkdown } from './rich-text.js'
-import type { InlineNode } from './rich-text.js'
 import { createCommentIndex } from './thread-data.js'
 import type {
   Comment,
@@ -44,6 +41,12 @@ const defaultLabels: CommentThreadLabels = {
   replyingTo: 'Replying to',
   cancelReply: 'Cancel reply',
   reply: 'Reply',
+  edit: 'Edit',
+  editPlaceholder: 'Edit your comment...',
+  save: 'Save',
+  saving: 'Saving...',
+  cancelEdit: 'Cancel',
+  editFailed: 'Could not save your changes. Please try again.',
   delete: 'Delete',
   deleting: 'Deleting...',
   cancelDelete: 'Cancel',
@@ -148,6 +151,21 @@ const useStyles = makeStyles({
     flexWrap: 'wrap',
     gap: tokens.spacingHorizontalXS,
     minHeight: `${avatarSize}px`,
+  },
+  headerActions: {
+    display: 'flex',
+    flexShrink: 0,
+  },
+  editForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    marginTop: tokens.spacingVerticalXS,
+  },
+  editActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
   },
   deleteAction: {
     flexShrink: 0,
@@ -264,13 +282,6 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalL,
     textAlign: 'center',
   },
-  code: {
-    padding: '0 4px',
-    borderRadius: tokens.borderRadiusSmall,
-    backgroundColor: tokens.colorNeutralBackground3,
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: '0.9em',
-  },
   mention: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -296,40 +307,11 @@ const useStyles = makeStyles({
   },
 })
 
-function renderInline(nodes: InlineNode[], codeClass: string): ReactNode {
-  return nodes.map((node, index) => {
-    switch (node.type) {
-      case 'text':
-        return node.text
-      case 'code':
-        return (
-          <code className={codeClass} key={index}>
-            {node.text}
-          </code>
-        )
-      case 'bold':
-        return <strong key={index}>{renderInline(node.children, codeClass)}</strong>
-      case 'italic':
-        return <em key={index}>{renderInline(node.children, codeClass)}</em>
-      case 'link':
-        return (
-          <Link href={node.href} target="_blank" rel="noopener noreferrer" inline key={index}>
-            {renderInline(node.children, codeClass)}
-          </Link>
-        )
-    }
-  })
-}
-
-function CommentText({ text, richText }: { text: string; richText: boolean }) {
+function CommentText({ text }: { text: string }) {
   const styles = useStyles()
   return parseMentions(text).map((part, index) =>
     part.contactId === undefined ? (
-      richText ? (
-        <span key={index}>{renderInline(parseInlineMarkdown(part.text), styles.code)}</span>
-      ) : (
-        part.text
-      )
+      part.text
     ) : (
       <span className={styles.mention} key={`${part.contactId}-${index}`}>
         <Avatar size={20} name={part.text} />
@@ -344,6 +326,19 @@ function ReplyIcon() {
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path
         d="m8 4-5 5 5 5M3 9h8a5 5 0 0 1 5 5v2"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function EditIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="m13.5 3.5 3 3L7 16H4v-3l9.5-9.5Z"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -383,6 +378,8 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
     comments,
     currentUser,
     onCreate,
+    onEdit,
+    canEdit = (comment, user) => comment.author.id === user.id,
     onDelete,
     canDelete = (comment, user) => comment.author.id === user.id,
     contactSearch,
@@ -390,7 +387,6 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
     filterMentionSuggestions,
     renderError,
     emoticons = false,
-    richText = false,
     loading = false,
     error = null,
     readOnly = false,
@@ -427,6 +423,11 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
   const [submitting, setSubmitting] = useState<Record<string, boolean>>({})
   const [submitErrors, setSubmitErrors] = useState<Record<string, CommentThreadError>>({})
   const pending = useRef(new Set<string>())
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<CommentThreadError | null>(null)
+  const editPending = useRef(false)
   const [deleteDialogMounted, setDeleteDialogMounted] = useState(false)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -506,6 +507,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
       loading ||
       globalError ||
       deletePending.current ||
+      editPending.current ||
       pending.current.has(draftId)
     )
       return
@@ -561,6 +563,64 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
     }
   }
 
+  const editEnabled = Boolean(onEdit) && !readOnly && !loading && !globalError
+
+  function focusEditTrigger(id: string) {
+    window.requestAnimationFrame(() => {
+      document.getElementById(`${instanceId}-edit-${encodeURIComponent(id)}`)?.focus()
+    })
+  }
+
+  function startEdit(comment: Comment) {
+    if (editPending.current) return
+    setEditingId(comment.id)
+    setEditDraft(comment.text)
+    setEditError(null)
+  }
+
+  function cancelEdit(comment: Comment) {
+    if (editPending.current) return
+    setEditingId(null)
+    setEditError(null)
+    focusEditTrigger(comment.id)
+  }
+
+  async function saveEdit(comment: Comment) {
+    const text = editDraft.trim()
+    if (
+      !onEdit ||
+      !text ||
+      text === comment.text ||
+      !editEnabled ||
+      editPending.current ||
+      deletePending.current ||
+      pending.current.size > 0
+    )
+      return
+    editPending.current = true
+    setEditSaving(true)
+    setEditError(null)
+    try {
+      await onEdit(comment, text)
+      setEditingId((current) => (current === comment.id ? null : current))
+      focusEditTrigger(comment.id)
+    } catch (cause: unknown) {
+      setEditError({
+        type: 'edit',
+        message: cause instanceof Error && cause.message ? cause.message : labels.editFailed,
+        cause,
+      })
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById(`${instanceId}-edit-field-${encodeURIComponent(comment.id)}`)
+          ?.focus()
+      })
+    } finally {
+      editPending.current = false
+      setEditSaving(false)
+    }
+  }
+
   function closeDeleteDialog() {
     const activeElement = document.activeElement
     if (activeElement instanceof HTMLElement && deleteSurface.current?.contains(activeElement)) {
@@ -585,6 +645,7 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
       !onDelete ||
       !deleteTarget ||
       deletePending.current ||
+      editPending.current ||
       pending.current.size > 0
     )
       return
@@ -655,6 +716,9 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
     const timeId = `${instanceId}-time-${encodeURIComponent(comment.id)}`
     // The action names stay short; the description tells assistive technology whose comment it is.
     const describedBy = `${authorId} ${timeId}`
+    const canEditComment = editEnabled && canEdit(comment, currentUser)
+    const canDeleteComment = Boolean(onDelete) && !readOnly && canDelete(comment, currentUser)
+    const isEditing = canEditComment && editingId === comment.id
     return (
       <div key={comment.id} className={styles.avatarRow}>
         <Avatar
@@ -681,30 +745,97 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                     : createdAt.toISOString()}
               </time>
             </div>
-            {onDelete && !readOnly && canDelete(comment, currentUser) && (
-              <Button
-                {...restoreFocusTarget}
-                appearance="subtle"
-                size="small"
-                className={styles.deleteAction}
-                icon={<DeleteIcon />}
-                aria-label={labels.delete}
-                aria-describedby={describedBy}
-                title={labels.delete}
-                disabled={deleting || Object.values(submitting).some(Boolean)}
-                onClick={(event) => {
-                  deleteTrigger.current = event.currentTarget
-                  event.currentTarget.focus()
-                  setDeleteDialogMounted(true)
-                  setDeleteError(null)
-                  setDeleteTargetId(comment.id)
-                }}
-              />
+            {(canEditComment || canDeleteComment) && (
+              <div className={styles.headerActions}>
+                {canEditComment && !isEditing && (
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    id={`${instanceId}-edit-${encodeURIComponent(comment.id)}`}
+                    className={styles.deleteAction}
+                    icon={<EditIcon />}
+                    aria-label={labels.edit}
+                    aria-describedby={describedBy}
+                    title={labels.edit}
+                    disabled={deleting || editSaving || Object.values(submitting).some(Boolean)}
+                    onClick={() => startEdit(comment)}
+                  />
+                )}
+                {canDeleteComment && (
+                  <Button
+                    {...restoreFocusTarget}
+                    appearance="subtle"
+                    size="small"
+                    className={styles.deleteAction}
+                    icon={<DeleteIcon />}
+                    aria-label={labels.delete}
+                    aria-describedby={describedBy}
+                    title={labels.delete}
+                    disabled={deleting || editSaving || Object.values(submitting).some(Boolean)}
+                    onClick={(event) => {
+                      deleteTrigger.current = event.currentTarget
+                      event.currentTarget.focus()
+                      setDeleteDialogMounted(true)
+                      setDeleteError(null)
+                      setDeleteTargetId(comment.id)
+                    }}
+                  />
+                )}
+              </div>
             )}
           </div>
-          <div className={styles.body}>
-            <CommentText text={comment.text} richText={richText} />
-          </div>
+          {isEditing ? (
+            <div className={styles.editForm}>
+              <CommentComposer
+                id={`${instanceId}-edit-field-${encodeURIComponent(comment.id)}`}
+                value={editDraft}
+                onChange={(value) => {
+                  setEditDraft(value)
+                  if (editError) setEditError(null)
+                }}
+                onSubmit={() => {
+                  void saveEdit(comment)
+                }}
+                onCancel={() => cancelEdit(comment)}
+                placeholder={labels.editPlaceholder}
+                labels={labels}
+                contactSearch={contactSearch}
+                mentionLimit={mentionLimit}
+                filterMentionSuggestions={filterMentionSuggestions}
+                renderError={renderError}
+                emoticons={emoticons}
+                disabled={editSaving}
+                focusOnReply
+              />
+              {editError &&
+                (renderError ? (
+                  renderError(editError)
+                ) : (
+                  <MessageBar intent="error" role="alert">
+                    <MessageBarBody>{editError.message}</MessageBarBody>
+                  </MessageBar>
+                ))}
+              <div className={styles.editActions}>
+                <Button size="small" disabled={editSaving} onClick={() => cancelEdit(comment)}>
+                  {labels.cancelEdit}
+                </Button>
+                <Button
+                  size="small"
+                  appearance="primary"
+                  disabled={editSaving || !editDraft.trim() || editDraft.trim() === comment.text}
+                  onClick={() => {
+                    void saveEdit(comment)
+                  }}
+                >
+                  {editSaving ? labels.saving : labels.save}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className={styles.body}>
+              <CommentText text={comment.text} />
+            </div>
+          )}
           <div className={styles.actions}>
             {!readOnly && depth < depthLimit && (
               <Button
@@ -906,7 +1037,6 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                           filterMentionSuggestions={filterMentionSuggestions}
                           renderError={renderError}
                           emoticons={emoticons}
-                          richText={richText}
                           disabled={loading || isSubmitting || deleting || Boolean(globalError)}
                           sendButton
                           focusOnReply={isReplying}
@@ -988,7 +1118,6 @@ export const CommentThread = forwardRef<HTMLDivElement, CommentThreadProps>(func
                     filterMentionSuggestions={filterMentionSuggestions}
                     renderError={renderError}
                     emoticons={emoticons}
-                    richText={richText}
                     disabled={
                       loading || Boolean(submitting.main) || deleting || Boolean(globalError)
                     }

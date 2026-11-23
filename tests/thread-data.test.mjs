@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createCommentIndex } from '../dist/thread-data.js'
-import { removeComment } from '../dist/index.js'
+import { removeComment, updateComment } from '../dist/index.js'
 import { CommentThread } from '../dist/CommentThread.js'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -127,6 +127,38 @@ test('delete actions are opt-in, author-only by default, overridable, and hidden
   assert.equal(countActions({ onDelete: async () => {}, canDelete: () => true }), 2)
   assert.equal(countActions({ onDelete: async () => {}, canDelete: () => false }), 0)
   assert.equal(countActions({ onDelete: async () => {}, readOnly: true }), 0)
+})
+
+test('edit actions are opt-in, author-only by default, overridable, and hidden in read-only mode', () => {
+  const props = {
+    comments: [
+      comment('own', null),
+      { ...comment('other', null), author: { id: 'other', name: 'Other User' } },
+    ],
+    currentUser: author,
+    onCreate: async () => {},
+    labels: { edit: 'Modify entry' },
+  }
+  const countActions = (overrides) =>
+    renderToStaticMarkup(createElement(CommentThread, { ...props, ...overrides })).match(
+      /aria-label="Modify entry"/g,
+    )?.length ?? 0
+  assert.equal(countActions({}), 0)
+  assert.equal(countActions({ onEdit: async () => {} }), 1)
+  assert.equal(countActions({ onEdit: async () => {}, canEdit: () => true }), 2)
+  assert.equal(countActions({ onEdit: async () => {}, canEdit: () => false }), 0)
+  assert.equal(countActions({ onEdit: async () => {}, readOnly: true }), 0)
+})
+
+test('updates one comment text without mutating the list', () => {
+  const comments = [comment('a', null, 'old'), comment('b', null, 'keep')]
+  const next = updateComment(comments, 'a', 'new')
+  assert.deepEqual(
+    next.map((entry) => entry.text),
+    ['new', 'keep'],
+  )
+  assert.equal(comments[0].text, 'old')
+  assert.throws(() => updateComment(comments, 'missing', 'x'), /no longer exists/)
 })
 
 test('mention tokens round-trip names and opaque IDs without treating markup as HTML', () => {

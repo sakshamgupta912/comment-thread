@@ -96,11 +96,11 @@ The component is controlled-only in v1; it does not keep a second, uncontrolled 
 
 Pass `contactSearch(query, signal)` to enable asynchronous @mention suggestions. Typing `@` opens the picker and calls `contactSearch` with an empty query, so return the initial suggestions for that case. The query is the text typed after `@` up to the caret: letters and digits in any script, `_`, `-`, and apostrophes, so names such as `José`, `李雷`, and `O'Brien` work. Any other character, such as a space or a sentence-ending period, closes the picker. Searches are debounced by 200 ms and stale responses are ignored. Use `mentionLimit` to cap the number of rendered suggestions, and `filterMentionSuggestions(suggestion, query)` to apply additional consumer-defined criteria after the search callback returns. Omit `mentionLimit` to render all valid results. The component stores mentions inline as `@[Name](userId)`. In this token format, `\` and `]` in the name are backslash-escaped, and the opaque user ID is URI-encoded, including parentheses. Apply the same token grammar in your application; mention parsing helpers are intentionally internal. Comment text is rendered as text, never HTML.
 
-## Emoticons and basic formatting
+## Emoticons and plain text
 
 Set `emoticons` to turn it on (it is off by default). Pass `true` for the built-in map, or a map such as `{ ':)': '😀' }` to replace the defaults. Typed emoticons such as `<3`, `:)`, and `;)` become emoji when followed by a space or `. , ! ?`. Only standalone emoticons are replaced, so `http://` and `a:)b` are untouched. Backspace or Ctrl/Cmd+Z immediately afterwards restores what was typed.
 
-Set `richText` to render a Markdown subset: `**bold**`, `*italic*`, `` `code` ``, and `[label](https://url)` (only `http`, `https`, and `mailto` links). It also enables Ctrl/Cmd+B, I, and E in the composer to wrap the selection in bold, italic, or code markers. Comments remain plain strings and are never rendered as HTML, so `richText` is safe to enable and off by default only so existing comments render as written. Mentions still work alongside formatting, but a formatting span cannot contain a mention.
+Comments use plain text with mention tokens, not rich text or Markdown. Formatting shortcuts such as Ctrl/Cmd+B, I, and U do not apply formatting in the composer, and pasted content is inserted as plain text. Markdown markers and HTML are displayed literally.
 
 ## Deleting comments
 
@@ -132,6 +132,25 @@ Request the updated `comments` state before resolving `onDelete`. While pending,
 
 Customize the dialog and action through `labels.delete`, `labels.deleting`, `labels.cancelDelete`, `labels.deleteTitle`, `labels.deleteConfirmation(comment, replyCount)`, and `labels.deleteFailed` (the fallback for rejections without an error message).
 
+## Editing comments
+
+Pass `onEdit(comment, text): Promise<void>` to show a pencil action beside the bin on each eligible comment. It replaces the comment text with an inline editor (mentions and emoticons work as in the composer) with Save and Cancel; Escape also cancels. Save is disabled while the text is empty or unchanged, and `text` is trimmed. Without this callback, no edit actions appear. By default, users can edit only their own comments. Override `canEdit(comment, currentUser)` for application-specific rules. Read-only mode always hides editing.
+
+The callback owns authorization, persistence, and updating `comments`; the component never changes controlled data itself. Request the updated `comments` state before resolving. While pending, deleting and posting are blocked. Reject with an `Error` to show a retryable error under the editor; the draft is kept. Validate permissions on the server, not just with `canEdit`.
+
+```tsx
+import { updateComment } from '@fluent/comment-thread'
+
+async function onEdit(comment: Comment, text: string) {
+  await api.updateComment(comment.id, text)
+  setComments((current) => updateComment(current, comment.id, text))
+}
+
+;<CommentThread comments={comments} currentUser={currentUser} onCreate={onCreate} onEdit={onEdit} />
+```
+
+The exported `updateComment(comments, commentId, text)` helper returns a new array with that comment's text replaced and throws if the comment is missing. Customize the UI through `labels.edit`, `labels.editPlaceholder`, `labels.save`, `labels.saving`, `labels.cancelEdit`, and `labels.editFailed` (the fallback for rejections without an error message). Failures are reported to `renderError` with type `edit`.
+
 ## Optional configuration
 
 `loading`, `error`, `readOnly`, `maxDepth`, `maxNestingDepth`, `headingLevel`, `pagination`, `pageSize`, `formatDate`, `labels`, `className`, `style`, standard root `<div>` attributes, and a forwarded root ref are supported.
@@ -141,6 +160,8 @@ Customize the dialog and action through `labels.delete`, `labels.deleting`, `lab
 | `comments`                 | `Comment[]`                                                            | Required; immutable updates, complete parent chains, unique non-empty IDs.                |
 | `currentUser`              | `CommentAuthor`                                                        | Required; the identity used for composers and default delete permissions.                 |
 | `onCreate`                 | `(input: CreateCommentInput) => Promise<void>`                         | Required; handles both root comments and replies.                                         |
+| `onEdit`                   | `(comment: Comment, text: string) => Promise<void>`                    | Omitted; editing is hidden until provided.                                                |
+| `canEdit`                  | `(comment: Comment, user: CommentAuthor) => boolean`                   | Author ID equals current-user ID. UI policy, not authorization.                           |
 | `onDelete`                 | `(comment: Comment) => Promise<void>`                                  | Omitted; deletion is hidden until provided. Remove the entire subtree.                    |
 | `canDelete`                | `(comment: Comment, user: CommentAuthor) => boolean`                   | Author ID equals current-user ID. UI policy, not authorization.                           |
 | `contactSearch`            | `(query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>` | Omitted; enables mentions when provided.                                                  |
@@ -148,7 +169,6 @@ Customize the dialog and action through `labels.delete`, `labels.deleting`, `lab
 | `filterMentionSuggestions` | `(suggestion, query) => boolean`                                       | Omitted; additional consumer-defined suggestion criteria.                                 |
 | `renderError`              | `(error: CommentThreadError) => ReactNode`                             | Omitted; uses the built-in Fluent UI error surfaces.                                      |
 | `emoticons`                | `boolean \| Record<string, string>`                                    | `false`; set to replace typed emoticons (`<3`, `:)`) with emoji. Pass a map to customize. |
-| `richText`                 | `boolean`                                                              | `false`; renders `**bold**`, `*italic*`, `` `code` ``, `[label](https://url)`.            |
 | `loading`                  | `boolean`                                                              | `false`; replaces the feed with a loading status.                                         |
 | `error`                    | `string \| null`                                                       | `null`; displays an external loading/data error.                                          |
 | `readOnly`                 | `boolean`                                                              | `false`; hides create/reply/delete, but still allows expanding conversations.             |
@@ -164,7 +184,7 @@ Customize the dialog and action through `labels.delete`, `labels.deleting`, `lab
 
 `Comment` contains `id: string`, `parentId: string | null`, `author: CommentAuthor`, `text: string`, and `createdAt: string`. `CommentAuthor` contains `id`, `name`, and optional `avatarUrl`. `MentionSuggestion` uses the same author shape. `CreateCommentInput` contains `text` and `parentId`.
 
-All component-handled failures use the optional `renderError` callback. It receives `{ type, message, cause }`, where `type` is `load`, `invalid-comments`, `post`, `delete`, or `mention-search`, and `cause` is the original thrown value when there is one (it is absent for the external `error` string). Return any React UI, such as an application-specific alert, retry action, or localized message. If omitted, the component uses its built-in Fluent UI error surfaces. The developer still owns retrying failed requests and setting the `error` prop for external data-loading failures.
+All component-handled failures use the optional `renderError` callback. It receives `{ type, message, cause }`, where `type` is `load`, `invalid-comments`, `post`, `edit`, `delete`, or `mention-search`, and `cause` is the original thrown value when there is one (it is absent for the external `error` string). Return any React UI, such as an application-specific alert, retry action, or localized message. If omitted, the component uses its built-in Fluent UI error surfaces. The developer still owns retrying failed requests and setting the `error` prop for external data-loading failures.
 
 ```tsx
 import type { CommentThreadError } from '@fluent/comment-thread'

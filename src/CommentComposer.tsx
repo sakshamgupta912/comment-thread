@@ -105,6 +105,8 @@ interface CommentComposerProps {
   value: string
   onChange: (value: string) => void
   onSubmit: () => void
+  /** Called when Escape is pressed while no mention list is open. */
+  onCancel?: () => void
   placeholder: string
   labels: CommentThreadLabels
   contactSearch?: (query: string, signal: AbortSignal) => Promise<MentionSuggestion[]>
@@ -112,13 +114,10 @@ interface CommentComposerProps {
   filterMentionSuggestions?: (suggestion: MentionSuggestion, query: string) => boolean
   renderError?: (error: CommentThreadError) => ReactNode
   emoticons?: boolean | EmoticonMap
-  richText?: boolean
   disabled?: boolean
   sendButton?: boolean
   focusOnReply?: boolean
 }
-
-const formatShortcuts: Record<string, string> = { b: '**', i: '*', e: '`' }
 
 function readEditor(element: Node): string {
   if (element.nodeType === Node.TEXT_NODE) return element.textContent ?? ''
@@ -142,6 +141,7 @@ export function CommentComposer({
   value,
   onChange,
   onSubmit,
+  onCancel,
   placeholder,
   labels,
   contactSearch,
@@ -149,7 +149,6 @@ export function CommentComposer({
   filterMentionSuggestions,
   renderError,
   emoticons = false,
-  richText = false,
   disabled = false,
   sendButton = false,
   focusOnReply = false,
@@ -229,6 +228,16 @@ export function CommentComposer({
 
   useEffect(() => {
     const element = editor.current
+    if (!element) return
+    const preventFormatting = (event: InputEvent) => {
+      if (event.inputType.startsWith('format')) event.preventDefault()
+    }
+    element.addEventListener('beforeinput', preventFormatting)
+    return () => element.removeEventListener('beforeinput', preventFormatting)
+  }, [])
+
+  useEffect(() => {
+    const element = editor.current
     if (!element || readEditor(element) === value) return
 
     const nodes = parseMentions(value).map((part) => {
@@ -285,36 +294,6 @@ export function CommentComposer({
     selection.collapse(last.node, last.start + last.emoticon.length + 1)
     lastEmoticon.current = null
     return true
-  }
-
-  // Wraps the selection (or inserts an empty pair at the caret) in Markdown markers, or removes
-  // them when the selection is already wrapped. Selections that cross a mention are left alone.
-  function toggleMarker(marker: string) {
-    const selection = window.getSelection()
-    const range = selection?.rangeCount ? selection.getRangeAt(0) : null
-    const node = range?.startContainer
-    if (!selection || !range || node !== range.endContainer) return
-    if (node.nodeType !== Node.TEXT_NODE || node.parentElement !== editor.current) return
-
-    const text = node as Text
-    const { startOffset: start, endOffset: end } = range
-    const before = text.data.slice(0, start)
-    const selected = text.data.slice(start, end)
-    const after = text.data.slice(end)
-    const size = marker.length
-    const wrapped =
-      before.endsWith(marker) &&
-      after.startsWith(marker) &&
-      !(marker === '*' && before.endsWith('**') && after.startsWith('**'))
-
-    if (wrapped) {
-      text.data = before.slice(0, -size) + selected + after.slice(size)
-      selection.setBaseAndExtent(text, start - size, text, end - size)
-    } else {
-      text.data = before + marker + selected + marker + after
-      selection.setBaseAndExtent(text, start + size, text, end + size)
-    }
-    onChange(readEditor(editor.current!))
   }
 
   function chooseSuggestion(index: number) {
@@ -450,13 +429,9 @@ export function CommentComposer({
             onChange(readEditor(event.currentTarget))
             return
           }
-          if (richText && modifier && !event.altKey && !event.shiftKey) {
-            const marker = formatShortcuts[event.key.toLowerCase()]
-            if (marker) {
-              event.preventDefault()
-              toggleMarker(marker)
-              return
-            }
+          if (modifier && !event.altKey && ['b', 'i', 'u'].includes(event.key.toLowerCase())) {
+            event.preventDefault()
+            return
           }
           if (
             listOpen &&
@@ -471,6 +446,9 @@ export function CommentComposer({
           } else if (listOpen && event.key === 'Escape') {
             event.preventDefault()
             setDismissedQuery(query)
+          } else if (event.key === 'Escape' && onCancel && !disabled) {
+            event.preventDefault()
+            onCancel()
           } else if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
             if (listOpen && suggestions.length) chooseSuggestion(activeIndex)

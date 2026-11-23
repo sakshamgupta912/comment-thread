@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components'
-import { CommentThread, removeComment } from '@fluent/comment-thread'
+import { CommentThread, removeComment, updateComment } from '@fluent/comment-thread'
 import type {
   Comment,
   CommentThreadError,
@@ -119,7 +119,6 @@ function App() {
       mentionLimit={limitMentions ? 1 : undefined}
       filterMentionSuggestions={filterMentions ? excludeCurrentUser : undefined}
       renderError={customErrors ? renderCustomError : undefined}
-      richText
       emoticons
       onCreate={async (input) => {
         setCreates((count) => count + 1)
@@ -140,6 +139,11 @@ function App() {
             createdAt: new Date().toISOString(),
           },
         ])
+      }}
+      onEdit={async (comment, text) => {
+        await new Promise((resolve) => setTimeout(resolve, 40))
+        if (failure) throw new Error('')
+        setComments((current) => updateComment(current, comment.id, text))
       }}
       onDelete={async (comment) => {
         setDeletes((count) => count + 1)

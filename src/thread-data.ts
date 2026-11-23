@@ -29,6 +29,14 @@ function isTimestamp(value: string): boolean {
   return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1]
 }
 
+/** Returns a new list with the selected comment's text replaced; other comments are untouched. */
+export function updateComment(comments: Comment[], commentId: string, text: string): Comment[] {
+  if (!comments.some((comment) => comment.id === commentId)) {
+    throw new Error('The comment no longer exists.')
+  }
+  return comments.map((comment) => (comment.id === commentId ? { ...comment, text } : comment))
+}
+
 /** Returns a new list without the selected comment or any of its descendants. */
 export function removeComment(comments: Comment[], commentId: string): Comment[] {
   const index = createCommentIndex(comments)

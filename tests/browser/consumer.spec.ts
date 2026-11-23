@@ -19,19 +19,44 @@ test('emoticons become emoji while typing and Backspace restores them', async ({
   await composer.press('Backspace')
   await expect(composer).toHaveText('<3 ')
 })
-test('richText renders posted Markdown and Ctrl+B wraps the selection', async ({ page }) => {
+test('formatting shortcuts leave the composer and submitted comment as plain text', async ({
+  page,
+}) => {
   const thread = page.getByTestId('first')
   const composer = thread.getByRole('combobox', { name: 'Start a new conversation...' })
-  await composer.click()
-  await composer.pressSequentially('word')
-  await composer.press('Shift+Home')
-  await composer.press('ControlOrMeta+b')
-  await expect(composer).toHaveText('**word**')
-  await composer.press('ControlOrMeta+b')
-  await expect(composer).toHaveText('word')
-  await composer.press('ControlOrMeta+b')
+  await composer.fill('word')
+  await composer.press('ControlOrMeta+a')
+  for (const key of ['b', 'i', 'u']) {
+    await composer.press(`ControlOrMeta+${key}`)
+    await expect(composer).toHaveText('word')
+    await expect(composer.locator('b, strong, i, em, u, span[style]')).toHaveCount(0)
+  }
+  await composer.press('ArrowRight')
+  await composer.pressSequentially(' **bold** *italic* `code` [link](https://x.test)')
+  const text = 'word **bold** *italic* `code` [link](https://x.test)'
+  await expect(composer).toHaveText(text)
   await thread.getByRole('button', { name: 'Post', exact: true }).click()
-  await expect(thread.locator('strong', { hasText: 'word' })).toBeVisible()
+  const posted = thread.getByRole('article').first()
+  await expect(posted.getByText(text, { exact: true })).toBeVisible()
+  await expect(posted.locator('strong, b, em, i, u, code, a')).toHaveCount(0)
+})
+
+test('native formatting commands are cancelled in the composer', async ({ page }) => {
+  const composer = page
+    .getByTestId('first')
+    .getByRole('combobox', { name: 'Start a new conversation...' })
+  await composer.fill('Plain text')
+  for (const inputType of ['formatBold', 'formatItalic', 'formatUnderline']) {
+    const allowed = await composer.evaluate(
+      (element, inputType) =>
+        element.dispatchEvent(
+          new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true }),
+        ),
+      inputType,
+    )
+    expect(allowed).toBe(false)
+  }
+  await expect(composer).toHaveText('Plain text')
 })
 
 test('changing page size and pagination modes resets the preview without losing drafts', async ({
@@ -202,6 +227,44 @@ test('pending deletion is not duplicated and failures use translated labels', as
   await expect(page.getByLabel('Delete calls')).toHaveText('1')
   await page.getByLabel('Read only').check()
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0)
+})
+
+test('editing a comment saves, cancels with Escape, and keeps the draft on failure', async ({
+  page,
+}) => {
+  const thread = page.getByTestId('first')
+  const article = thread.getByRole('article').first()
+  const edit = article.getByRole('button', { name: 'Edit', exact: true }).first()
+  await expect(
+    thread.getByRole('article').nth(1).getByRole('button', { name: 'Edit', exact: true }),
+  ).toHaveCount(0)
+
+  await edit.click()
+  const field = article.getByRole('combobox', { name: 'Edit your comment...' })
+  await expect(field).toBeFocused()
+  await expect(field).toHaveText('First conversation')
+  await expect(article.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+  await field.press('Escape')
+  await expect(field).toHaveCount(0)
+  await expect(edit).toBeFocused()
+
+  await page.getByLabel('Fail callbacks').check()
+  await edit.click()
+  await field.fill('Changed text')
+  await field.press('Enter')
+  await expect(article.getByRole('alert')).toHaveText(
+    'Could not save your changes. Please try again.',
+  )
+  await expect(field).toHaveText('Changed text')
+
+  await page.getByLabel('Fail callbacks').uncheck()
+  await article.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(field).toHaveCount(0)
+  await expect(article.getByText('Changed text', { exact: true })).toBeVisible()
+  await expect(edit).toBeFocused()
+
+  await page.getByLabel('Read only').check()
+  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
 })
 
 for (const dark of [false, true]) {
